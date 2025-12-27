@@ -1,0 +1,84 @@
+/* Force the root element to fill the screen */
+#root {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  text-align: left; /* Vite defaults often set this to center */
+}
+
+/* ... keep the rest of your CSS below ... */
+body, html {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* ... */
+}
+
+/* Reset basic margins */
+body, html {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f0f2f5; /* Light gray background like Facebook/LinkedIn */
+}
+
+/* The Top Banner */
+.banner {
+  background-color: #4A90E2; /* Nice professional blue */
+  color: white;
+  padding: 15px 30px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.banner h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+/* The Main Container */
+.main-container {
+  display: flex;
+  justify-content: center; /* Keeps it centered horizontally */
+  
+  /* FIX 1: Align items to the top (start) instead of forcing them to the middle */
+  align-items: flex-start; 
+  
+  /* FIX 2: Allow the container to grow as tall as it needs to be (scrolling) */
+  min-height: 100vh; 
+  
+  /* Add some breathing room so it doesn't touch the banner immediately */
+  padding-top: 50px; 
+  padding-bottom: 50px;
+}
+
+/* Optional: Update auth-box to look good with the new layout */
+.auth-box {
+  background: white;
+  padding: 40px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+  
+  /* Push the login box down a little so it isn't glued to the banner */
+  margin-top: 5vh; 
+}
+
+/* Toggle Link (The "Don't have an account?" text) */
+.toggle-text {
+  margin-top: 20px;
+  color: #666;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.toggle-text span {
+  color: #4A90E2;
+  font-weight: bold;
+  text-decoration: underline;
+}
