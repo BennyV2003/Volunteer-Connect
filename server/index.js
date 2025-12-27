@@ -119,19 +119,16 @@ app.get("/dashboard", authorization, async (req, res) => {
     }
 });
 
-// Create Event Route
+// Create a Volunteer Event
 app.post("/events", authorization, async (req, res) => {
     try {
-        const { title, description, event_date, location } = req.body;
+        // We now expect 'event_end' from the body
+        const { title, description, location, event_date, event_end } = req.body; 
         
-        // We get req.user.user_id from the token verification step!
-        const organizer_id = req.user.user_id;
-
         const newEvent = await pool.query(
-            "INSERT INTO events (organizer_id, title, description, event_date, location) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-            [organizer_id, title, description, event_date, location]
+            "INSERT INTO events (title, description, location, event_date, event_end, organizer_id) VALUES($1, $2, $3, $4, $5, $6) RETURNING *",
+            [title, description, location, event_date, event_end, req.user.user_id]
         );
-
         res.json(newEvent.rows[0]);
     } catch (err) {
         console.error(err.message);
@@ -217,12 +214,11 @@ app.delete("/events/:id", authorization, async (req, res) => {
 app.put("/events/:id", authorization, async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, description, location, event_date } = req.body;
+        const { title, description, location, event_date, event_end } = req.body;
 
-        // Update the event in the database
         const updateEvent = await pool.query(
-            "UPDATE events SET title = $1, description = $2, location = $3, event_date = $4 WHERE event_id = $5 RETURNING *",
-            [title, description, location, event_date, id]
+            "UPDATE events SET title = $1, description = $2, location = $3, event_date = $4, event_end = $5 WHERE event_id = $6",
+            [title, description, location, event_date, event_end, id]
         );
 
         res.json("Event was updated!");
@@ -267,6 +263,44 @@ app.post("/events/:id/signup", authorization, async (req, res) => {
         );
 
         res.json("Signup Successful!");
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// Get all events a specific volunteer has signed up for
+app.get("/my-signups", authorization, async (req, res) => {
+    try {
+        const volunteer_id = req.user.user_id; // From the token
+
+        // We join 'signups' with 'events' to get the event details
+        // We also grab the 'status' so we know if they attended or not
+        const mySignups = await pool.query(
+            "SELECT events.*, signups.status FROM signups JOIN events ON signups.event_id = events.event_id WHERE signups.volunteer_id = $1 ORDER BY events.event_date ASC",
+            [volunteer_id]
+        );
+
+        res.json(mySignups.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// Unregister (Cancel Signup)
+app.delete("/events/:id/signup", authorization, async (req, res) => {
+    try {
+        const { id } = req.params; // Event ID
+        const volunteer_id = req.user.user_id; // From token
+
+        // Delete the specific signup record
+        await pool.query(
+            "DELETE FROM signups WHERE volunteer_id = $1 AND event_id = $2",
+            [volunteer_id, id]
+        );
+
+        res.json("Unregistered successfully");
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");

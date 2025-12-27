@@ -4,6 +4,7 @@ import Login from "./Login";
 import Register from "./Register";
 import EventBoard from "./EventBoard";
 import OrgDashboard from "./OrgDashboard";
+import MySignups from "./MySignups";
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
@@ -51,6 +52,8 @@ function App() {
     }
   }, [token]);
 
+  const [refreshTrigger, setRefreshTrigger] = useState(false);
+  
   return (
     <div>
       <div className="banner">
@@ -103,8 +106,14 @@ function App() {
               // If Org: Show the Management Dashboard (Create + My Events)
               <OrgDashboard />
             ) : (
-              // If Volunteer: Show the Public Event Board
-              <EventBoard />
+              // VOLUNTEER VIEW
+              <div style={{ width: "100%" }}>
+                  {/* 2. Pass the signal to MySignups (so it listens) */}
+                  <MySignups refreshTrigger={refreshTrigger} />
+           
+                  {/* 3. Pass the 'ringer' to EventBoard (so it can trigger the update) */}
+                  <EventBoard onSignupSuccess={() => setRefreshTrigger(!refreshTrigger)} />
+              </div>
             )}
           </div>
         )}
