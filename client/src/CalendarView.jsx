@@ -1,60 +1,83 @@
-import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
-import format from 'date-fns/format';
-import parse from 'date-fns/parse';
-import startOfWeek from 'date-fns/startOfWeek';
-import getDay from 'date-fns/getDay';
-import "react-big-calendar/lib/css/react-big-calendar.css";
-import enUS from 'date-fns/locale/en-US';
+import { useState } from 'react';
+import { Calendar, momentLocalizer } from 'react-big-calendar';
+import moment from 'moment';
+import 'react-big-calendar/lib/css/react-big-calendar.css';
+import EventModal from "./EventModal"; // <--- IMPORT THIS
 
-// 1. Setup the "Localizer" (Helps the calendar understand dates/times)
-const locales = {
-  'en-US': enUS,
-};
+const localizer = momentLocalizer(moment);
 
-const localizer = dateFnsLocalizer({
-  format,
-  parse,
-  startOfWeek,
-  getDay,
-  locales,
-});
-
-const CalendarView = ({ events, onEventClick }) => {
-    
-    // 2. Transform DB data into Calendar data
-    // The library needs "start" and "end" as Date objects
-    const calendarEvents = events.map(event => {
-        const startDate = new Date(event.event_date);
-        
-        // Logic: If we have an end date, use it. 
-        // If not (for old events), default to start + 2 hours.
-        let endDate;
-        if (event.event_end) {
-            endDate = new Date(event.event_end);
-        } else {
-            endDate = new Date(startDate.getTime() + (2 * 60 * 60 * 1000));
-        }
-
-        return {
-            title: event.title,
-            start: startDate,
-            end: endDate,
-            resource: event
-        };
-    });
+const CustomToolbar = (toolbar) => {
+    // ... (Keep your CustomToolbar code exactly the same as before) ...
+    // I am omitting it here to save space, but DO NOT DELETE IT from your file!
+    const goToBack = () => toolbar.onNavigate('PREV');
+    const goToNext = () => toolbar.onNavigate('NEXT');
+    const goToCurrent = () => toolbar.onNavigate('TODAY');
 
     return (
-        <div style={{ height: "500px", marginTop: "20px", backgroundColor: "white", padding: "20px", borderRadius: "8px" }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px', padding: '0 10px' }}>
+            <div style={{ flex: 1, display: 'flex', gap: '5px' }}>
+                <button onClick={goToCurrent} style={btnStyle}>Today</button>
+                <button onClick={goToBack} style={btnStyle}>Back</button>
+                <button onClick={goToNext} style={btnStyle}>Next</button>
+            </div>
+            <h3 style={{ flex: 1, textAlign: 'center', margin: 0, color: '#FF5E17', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                {toolbar.label}
+            </h3>
+            <div style={{ flex: 1 }}></div> 
+        </div>
+    );
+};
+
+const btnStyle = { padding: '6px 12px', border: '1px solid #ccc', backgroundColor: 'white', borderRadius: '4px', cursor: 'pointer', color: '#555', fontWeight: 'bold' };
+
+const CalendarView = ({ events, onEventClick }) => {
+    const [date, setDate] = useState(new Date());
+    const [selectedEvent, setSelectedEvent] = useState(null); // <--- NEW STATE
+
+    const myEventsList = events.map(event => ({
+        title: event.title,
+        start: new Date(event.event_date),
+        end: event.event_end ? new Date(event.event_end) : new Date(new Date(event.event_date).getTime() + (2*60*60*1000)),
+        resource: event 
+    }));
+
+    const eventStyleGetter = (event) => {
+        const isFull = event.resource.capacity && event.resource.current_count >= event.resource.capacity;
+        return {
+            style: {
+                backgroundColor: isFull ? '#6c757d' : '#FF5E17',
+                borderRadius: '5px', opacity: 0.8, color: 'white', border: '0px', display: 'block'
+            }
+        };
+    };
+
+    return (
+        <div style={{ height: '550px', marginTop: '20px', backgroundColor: 'white', padding: '20px', borderRadius: '10px', boxShadow: "0 2px 5px rgba(0,0,0,0.05)" }}>
             <Calendar
                 localizer={localizer}
-                events={calendarEvents}
+                events={myEventsList}
                 startAccessor="start"
                 endAccessor="end"
-                style={{ height: "100%" }}
-                onSelectEvent={(event) => onEventClick(event.resource.event_id)} // Handle clicks
-                views={['month', 'week', 'day']} // Views available
-                defaultView="month"
+                style={{ height: '100%' }}
+                date={date} 
+                onNavigate={(newDate) => setDate(newDate)} 
+                view='month'
+                onView={() => {}}
+                components={{ toolbar: CustomToolbar }}
+                eventPropGetter={eventStyleGetter}
+                
+                // CHANGE: Instead of signing up immediately, Open the Modal
+                onSelectEvent={(event) => setSelectedEvent(event.resource)} 
             />
+
+            {/* RENDER MODAL IF EVENT SELECTED */}
+            {selectedEvent && (
+                <EventModal 
+                    event={selectedEvent} 
+                    onClose={() => setSelectedEvent(null)} 
+                    onSignup={onEventClick} // Pass the original signup function here
+                />
+            )}
         </div>
     );
 };

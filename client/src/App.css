@@ -3,35 +3,43 @@
   width: 100%;
   margin: 0;
   padding: 0;
-  text-align: left; /* Vite defaults often set this to center */
+  text-align: left;
 }
 
-/* ... keep the rest of your CSS below ... */
-body, html {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  /* ... */
-}
-
-/* Reset basic margins */
+/* --- MAIN BACKGROUND SETUP --- */
 body, html {
   margin: 0;
   padding: 0;
   height: 100%;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background-color: #f0f2f5; /* Light gray background like Facebook/LinkedIn */
+
+  /* 1. Set a fallback color */
+  background-color: #f0f2f5;
+
+  /* 2. THE OVERLAY MAGIC */
+  /* This layers a 75% transparent white sheet ON TOP of your image */
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.75)),
+    url('/background.jpg'); /* Make sure image is in client/public/ folder */
+
+  /* 3. Lock the background in place */
+  background-size: cover;       /* Stretch to fill screen */
+  background-position: center;  /* Center the image */
+  background-attachment: fixed; /* Keep image still while scrolling */
+  background-repeat: no-repeat;
 }
 
-/* The Top Banner */
+/* Banner Styles */
 .banner {
-  background-color: #4A90E2; /* Nice professional blue */
+  background-color: #FF5E17; /* UTRGV Orange */
   color: white;
-  padding: 15px 30px;
+  padding: 10px 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  position: relative; /* Ensure banner sits on top */
+  z-index: 10;
 }
 
 .banner h1 {
@@ -39,23 +47,26 @@ body, html {
   font-size: 1.5rem;
 }
 
-/* The Main Container */
+/* client/src/App.css */
+
 .main-container {
   display: flex;
-  justify-content: center; /* Keeps it centered horizontally */
+  justify-content: center;
+  align-items: flex-start;
+
+  /* FIX 1: Subtract the banner height (approx 60px) from the full screen height */
+  min-height: calc(100vh - 60px);
   
-  /* FIX 1: Align items to the top (start) instead of forcing them to the middle */
-  align-items: flex-start; 
+  /* FIX 2: Include padding in the height calculation so it doesn't expand the page */
+  box-sizing: border-box; 
   
-  /* FIX 2: Allow the container to grow as tall as it needs to be (scrolling) */
-  min-height: 100vh; 
-  
-  /* Add some breathing room so it doesn't touch the banner immediately */
-  padding-top: 50px; 
+  padding-top: 50px;
   padding-bottom: 50px;
+  
+  background-color: transparent;
 }
 
-/* Optional: Update auth-box to look good with the new layout */
+/* Auth Box (Login/Register) */
 .auth-box {
   background: white;
   padding: 40px;
@@ -64,12 +75,10 @@ body, html {
   width: 100%;
   max-width: 400px;
   text-align: center;
-  
-  /* Push the login box down a little so it isn't glued to the banner */
   margin-top: 5vh; 
 }
 
-/* Toggle Link (The "Don't have an account?" text) */
+/* Toggle Link */
 .toggle-text {
   margin-top: 20px;
   color: #666;
@@ -78,7 +87,7 @@ body, html {
 }
 
 .toggle-text span {
-  color: #4A90E2;
+  color: #FF5E17; /* Changed to match UTRGV Orange */
   font-weight: bold;
   text-decoration: underline;
 }

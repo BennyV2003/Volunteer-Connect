@@ -106,13 +106,32 @@ app.post("/login", async (req, res) => {
     }
 });
 
-// Protected Dashboard Route
+// Get User Name, Role, AND Volunteer Stats
 app.get("/dashboard", authorization, async (req, res) => {
     try {
-        // req.user has the payload (user_id) because the middleware put it there!
-        const user = await pool.query("SELECT full_name, role FROM users WHERE user_id = $1", [req.user.user_id]); 
+        // 1. Get User Name and Role
+        const user = await pool.query(
+            "SELECT full_name, role FROM users WHERE user_id = $1", 
+            [req.user.user_id]
+        );
         
-        res.json(user.rows[0]);
+        // 2. Get Volunteer Stats (Count events and Sum hours where status is 'attended')
+        // We use COALESCE to return '0' instead of 'null' if they haven't volunteered yet.
+        const stats = await pool.query(
+            `SELECT 
+                COUNT(*) as event_count, 
+                COALESCE(SUM(hours_awarded), 0) as total_hours 
+             FROM signups 
+             WHERE volunteer_id = $1 AND status = 'attended'`,
+            [req.user.user_id]
+        );
+
+        // 3. Send combined data back to frontend
+        res.json({ 
+            ...user.rows[0], 
+            ...stats.rows[0] 
+        });
+
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
@@ -122,12 +141,12 @@ app.get("/dashboard", authorization, async (req, res) => {
 // Create a Volunteer Event
 app.post("/events", authorization, async (req, res) => {
     try {
-        // We now expect 'event_end' from the body
-        const { title, description, location, event_date, event_end } = req.body; 
+        // Now accepting 'capacity'
+        const { title, description, location, event_date, event_end, capacity } = req.body; 
         
         const newEvent = await pool.query(
-            "INSERT INTO events (title, description, location, event_date, event_end, organizer_id) VALUES($1, $2, $3, $4, $5, $6) RETURNING *",
-            [title, description, location, event_date, event_end, req.user.user_id]
+            "INSERT INTO events (title, description, location, event_date, event_end, capacity, organizer_id) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+            [title, description, location, event_date, event_end, capacity, req.user.user_id]
         );
         res.json(newEvent.rows[0]);
     } catch (err) {
@@ -136,11 +155,15 @@ app.post("/events", authorization, async (req, res) => {
     }
 });
 
-// Get All Events (Public Route - No Token Needed)
+// Get All Events (With "Spots Filled" Count)
 app.get("/events", async (req, res) => {
     try {
         const allEvents = await pool.query(
-            "SELECT events.*, users.full_name as organizer FROM events JOIN users ON events.organizer_id = users.user_id"
+            `SELECT events.*, 
+                    users.full_name as organizer, 
+                    (SELECT COUNT(*)::int FROM signups WHERE signups.event_id = events.event_id) as current_count 
+             FROM events 
+             JOIN users ON events.organizer_id = users.user_id`
         );
         res.json(allEvents.rows);
     } catch (err) {
@@ -164,14 +187,27 @@ app.get("/my-events", authorization, async (req, res) => {
     }
 });
 
-// 1. Get List of Volunteers for a specific event
+// Get all attendees for a specific event
 app.get("/events/:id/attendees", authorization, async (req, res) => {
     try {
-        const { id } = req.params; // The event_id
+        const { id } = req.params;
+        
+        // We added check_in_time and check_out_time to this query
         const attendees = await pool.query(
-            "SELECT s.signup_id, s.status, s.hours_awarded, u.full_name, u.email FROM signups s JOIN users u ON s.volunteer_id = u.user_id WHERE s.event_id = $1",
+            `SELECT 
+                users.full_name, 
+                users.email, 
+                signups.signup_id, 
+                signups.status, 
+                signups.hours_awarded,
+                signups.check_in_time, 
+                signups.check_out_time 
+            FROM signups 
+            JOIN users ON signups.volunteer_id = users.user_id 
+            WHERE signups.event_id = $1`,
             [id]
         );
+        
         res.json(attendees.rows);
     } catch (err) {
         console.error(err.message);
@@ -179,17 +215,36 @@ app.get("/events/:id/attendees", authorization, async (req, res) => {
     }
 });
 
-// 2. Mark a Volunteer as Present (Update Status)
+// Update Volunteer Status & Hours (The "Time Clock" Route)
 app.put("/signups/:id", authorization, async (req, res) => {
     try {
-        const { id } = req.params; // signup_id
-        const { status, hours_awarded } = req.body;
-        
+        const { id } = req.params; // Signup ID
+        const { status, check_in, check_out } = req.body;
+
+        let hours = 0;
+
+        // LOGIC: If they attended, calculate the exact duration
+        if (status === 'attended' && check_in && check_out) {
+            const start = new Date(check_in);
+            const end = new Date(check_out);
+            
+            // Calculate difference in milliseconds
+            const diffMs = end - start; 
+            
+            // Convert to hours (e.g., 2.5 hours)
+            hours = diffMs / (1000 * 60 * 60); 
+
+            // Safety check: Prevent negative hours
+            if (hours < 0) hours = 0;
+        }
+
+        // Update the database
         await pool.query(
-            "UPDATE signups SET status = $1, hours_awarded = $2 WHERE signup_id = $3",
-            [status, hours_awarded, id]
+            "UPDATE signups SET status = $1, check_in_time = $2, check_out_time = $3, hours_awarded = $4 WHERE signup_id = $5",
+            [status, check_in, check_out, hours, id]
         );
-        res.json("Updated successfully");
+
+        res.json("Attendance updated successfully");
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
@@ -228,10 +283,24 @@ app.put("/events/:id", authorization, async (req, res) => {
     }
 });
 
-// Mark Event as Completed
+// Mark Event as Completed (With Safety Check)
 app.put("/events/:id/complete", authorization, async (req, res) => {
     try {
         const { id } = req.params;
+
+        // 1. Check for unprocessed volunteers
+        // We look for any rows where status is still the default 'registered'
+        const unprocessed = await pool.query(
+            "SELECT * FROM signups WHERE event_id = $1 AND status = 'registered'",
+            [id]
+        );
+
+        if (unprocessed.rows.length > 0) {
+            // STOP! Return a 400 error with a specific message
+            return res.status(400).json(`Cannot complete event. There are still ${unprocessed.rows.length} volunteers marked as 'Registered'. Please mark them as Attended or Absent first.`);
+        }
+
+        // 2. If check passes, mark complete
         await pool.query("UPDATE events SET is_completed = TRUE WHERE event_id = $1", [id]);
         res.json("Event marked as completed");
     } catch (err) {
@@ -240,13 +309,29 @@ app.put("/events/:id/complete", authorization, async (req, res) => {
     }
 });
 
-// Volunteer Signup Route
+// Volunteer Signup Route (With Capacity Check)
 app.post("/events/:id/signup", authorization, async (req, res) => {
     try {
-        const { id } = req.params; // Event ID
-        const volunteer_id = req.user.user_id; // Vic's ID from the token
+        const { id } = req.params;
+        const volunteer_id = req.user.user_id;
 
-        // 1. Check if already signed up
+        // 1. Get Event Capacity and Current Count
+        const eventInfo = await pool.query(
+            `SELECT capacity, 
+            (SELECT COUNT(*) FROM signups WHERE event_id = $1) as current_count 
+            FROM events WHERE event_id = $1`, 
+            [id]
+        );
+
+        const limit = eventInfo.rows[0].capacity;
+        const current = parseInt(eventInfo.rows[0].current_count);
+
+        // 2. CHECK: Is it full? (Only if a limit exists)
+        if (limit !== null && current >= limit) {
+            return res.status(400).json("Sorry, this event has reached maximum capacity!");
+        }
+
+        // 3. Check if already signed up (Existing logic)
         const check = await pool.query(
             "SELECT * FROM signups WHERE volunteer_id = $1 AND event_id = $2",
             [volunteer_id, id]
@@ -256,7 +341,7 @@ app.post("/events/:id/signup", authorization, async (req, res) => {
             return res.status(400).json("You are already registered for this event!");
         }
 
-        // 2. Insert new signup
+        // 4. Insert new signup
         await pool.query(
             "INSERT INTO signups (volunteer_id, event_id) VALUES ($1, $2)",
             [volunteer_id, id]
@@ -272,12 +357,19 @@ app.post("/events/:id/signup", authorization, async (req, res) => {
 // Get all events a specific volunteer has signed up for
 app.get("/my-signups", authorization, async (req, res) => {
     try {
-        const volunteer_id = req.user.user_id; // From the token
+        const volunteer_id = req.user.user_id;
 
-        // We join 'signups' with 'events' to get the event details
-        // We also grab the 'status' so we know if they attended or not
+        // FIXED: Added check_in_time and check_out_time
         const mySignups = await pool.query(
-            "SELECT events.*, signups.status FROM signups JOIN events ON signups.event_id = events.event_id WHERE signups.volunteer_id = $1 ORDER BY events.event_date ASC",
+            `SELECT events.*, 
+                    signups.status, 
+                    signups.hours_awarded, 
+                    signups.check_in_time, 
+                    signups.check_out_time 
+             FROM signups 
+             JOIN events ON signups.event_id = events.event_id 
+             WHERE signups.volunteer_id = $1 
+             ORDER BY events.event_date ASC`,
             [volunteer_id]
         );
 

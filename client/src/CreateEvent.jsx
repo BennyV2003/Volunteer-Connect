@@ -1,13 +1,15 @@
 import { useState } from "react";
 
+
 const CreateEvent = () => {
     const [eventData, setEventData] = useState({
-        title: "",
-        description: "",
+        title: "", 
+        description: "", 
         date: "", 
-        startTime: "", // Renamed for clarity
-        endTime: "",   // NEW
-        location: ""
+        startTime: "", 
+        endTime: "", 
+        location: "",
+        capacity: "" // NEW
     });
 
     const handleChange = (e) => {
@@ -23,12 +25,31 @@ const CreateEvent = () => {
         // 2. Combine Date + End Time
         const combinedEnd = `${eventData.date}T${eventData.endTime}:00`;
 
+        const now = new Date(); // Get current date and time
+
+        // --- VALIDATION 1: PAST DATES ---
+        // Check if the Start time is in the past
+        if (new Date(combinedStart) < now) {
+            alert("Error: You cannot schedule an event in the past.");
+            return;
+        }
+        // --------------------------------
+
+        // --- NEW SAFETY CHECK ---
+        // We create Date objects just to compare them
+        if (new Date(combinedEnd) <= new Date(combinedStart)) {
+            alert("Error: End Time cannot be before Start Time.");
+            return; // Stop here! Do not send to database.
+        }
+        // ------------------------
+
         const bodyToSend = {
             title: eventData.title,
             description: eventData.description,
             location: eventData.location,
             event_date: combinedStart,
-            event_end: combinedEnd // NEW
+            event_end: combinedEnd,
+            capacity: eventData.capacity === "" ? null : eventData.capacity
         };
 
         try {
@@ -79,10 +100,25 @@ const CreateEvent = () => {
                     </div>
                 </div>
 
-                <div style={{display: "flex", flexDirection: "column"}}>
-                    <label style={{fontWeight: "bold", marginBottom: "5px"}}>Location</label>
-                    <input type="text" name="location" placeholder="e.g. 123 Ocean Drive" value={eventData.location} onChange={handleChange} required style={{padding: "10px", borderRadius: "5px", border: "1px solid #ccc"}}/>
-                </div>
+                <div style={{display: "flex", gap: "20px"}}></div>
+                    <div style={{display: "flex", flexDirection: "column", flex: 2 }}>
+                        <label style={{fontWeight: "bold", marginBottom: "5px"}}>Location</label>
+                        <input type="text" name="location" placeholder="e.g. 123 Ocean Drive" value={eventData.location} onChange={handleChange} required style={{padding: "10px", borderRadius: "5px", border: "1px solid #ccc"}}/>
+                    </div>
+
+                    {/* NEW CAPACITY INPUT */}
+                    <div style={{display: "flex", flexDirection: "column", flex: 1}}>
+                        <label style={{fontWeight: "bold", marginBottom: "5px"}}>Max Volunteers</label>
+                        <input 
+                            type="number" 
+                            name="capacity" 
+                            placeholder="No Limit" 
+                            min="1"
+                            value={eventData.capacity} 
+                            onChange={handleChange} 
+                            style={{padding: "10px", borderRadius: "5px", border: "1px solid #ccc"}}
+                        />
+                    </div>
 
                 <div style={{display: "flex", flexDirection: "column"}}>
                     <label style={{fontWeight: "bold", marginBottom: "5px"}}>Description</label>

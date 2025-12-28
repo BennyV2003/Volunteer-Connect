@@ -1,26 +1,44 @@
 import { useState, useEffect } from "react";
+import VolunteerRow from "./VolunteerRow";
+import { toast } from 'react-toastify'; 
 
 const EventManager = ({ event, onBack }) => {
     const [attendees, setAttendees] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    
-    // NEW: Edit Mode State
     const [isEditing, setIsEditing] = useState(false);
+
+    // --- NEW STATE: Tracks the current version of the event to display ---
+    // We initialize it with the data passed in, but we can update it locally later.
+    const [displayEvent, setDisplayEvent] = useState(event);
+
+    // --- HELPER: Extracts LOCAL time for input boxes ---
+    const formatLocalForInput = (dateString) => {
+        if (!dateString) return "";
+        const date = new Date(dateString);
+        
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    };
+
+    // Initialize Edit Data from the displayEvent state
     const [editData, setEditData] = useState({
-        title: event.title,
-        description: event.description,
-        location: event.location,
-        // Format date for the input field (yyyy-MM-ddThh:mm)
-        event_date: new Date(event.event_date).toISOString().slice(0, 16)
+        title: displayEvent.title,
+        description: displayEvent.description,
+        location: displayEvent.location,
+        event_date: formatLocalForInput(displayEvent.event_date),
+        event_end: formatLocalForInput(displayEvent.event_end)
     });
 
     useEffect(() => {
-
-        // NEW LINE: Force scroll to top immediately
         window.scrollTo(0, 0);
-        
         const getAttendees = async () => {
             try {
+                // Use event.event_id (ID never changes, so using the prop is safe)
                 const response = await fetch(`http://localhost:5000/events/${event.event_id}/attendees`, {
                     headers: { token: localStorage.getItem("token") }
                 });
@@ -29,18 +47,23 @@ const EventManager = ({ event, onBack }) => {
                 setIsLoading(false);
             } catch (err) {
                 console.error(err);
+                toast.error("Failed to load attendees");
             }
         };
         getAttendees();
-    }, [event]);
+    }, [event.event_id]);
 
-    // Handle typing in the edit fields
     const handleEditChange = (e) => {
         setEditData({ ...editData, [e.target.name]: e.target.value });
     };
 
-    // Save changes to the backend
     const saveChanges = async () => {
+        // Validation: Start vs End Time
+        if (new Date(editData.event_end) <= new Date(editData.event_date)) {
+            toast.error("❌ End Time cannot be before Start Time.");
+            return;
+        }
+        
         try {
             const response = await fetch(`http://localhost:5000/events/${event.event_id}`, {
                 method: "PUT",
@@ -52,25 +75,43 @@ const EventManager = ({ event, onBack }) => {
             });
 
             if (response.ok) {
-                alert("Event Updated!");
+                toast.success("✏️ Event updated successfully!");
+                
+                // 1. UPDATE DISPLAY LOCALLY (This makes the changes appear instantly)
+                setDisplayEvent({
+                    ...displayEvent, // Keep ID, status, etc.
+                    ...editData      // Overwrite title, location, dates
+                });
+
+                // 2. EXIT EDIT MODE (But stay on this screen)
                 setIsEditing(false);
-                // We refresh the whole page so the dashboard updates too
-                window.location.reload(); 
+                
+                // REMOVED: window.location.reload() <--- No longer needed!
+            } else {
+                const errorText = await response.text(); 
+                toast.error(`❌ Update failed: ${errorText}`);
             }
         } catch (err) {
             console.error(err);
+            toast.error("Server Error: Could not save changes.");
         }
     };
 
     const handleDelete = async () => {
         if (confirm("Are you sure? This will remove the event and all signup records.")) {
             try {
-                await fetch(`http://localhost:5000/events/${event.event_id}`, {
+                const response = await fetch(`http://localhost:5000/events/${event.event_id}`, {
                     method: "DELETE",
                     headers: { token: localStorage.getItem("token") }
                 });
-                // We reload to clear the deleted event from the list
-                window.location.reload(); 
+                
+                if (response.ok) {
+                    toast.success("🗑️ Event deleted. Loading dashboard");
+                    // For delete, we DO want to reload/go back because this page no longer exists
+                    setTimeout(() => window.location.reload(), 2000);
+                } else {
+                    toast.error("Failed to delete event.");
+                }
             } catch (err) {
                 console.error(err);
             }
@@ -86,8 +127,14 @@ const EventManager = ({ event, onBack }) => {
                 });
 
                 if (response.ok) {
-                    alert("Event marked as Completed!");
-                    onBack(); // Go back to the dashboard to see it move to the "Past" section
+                    toast.success("✅ Event marked as Completed!");
+                    // Update local state to reflect the closed status instantly
+                    setDisplayEvent({...displayEvent, is_completed: true});
+                    // Optional: Go back if you prefer, or stay here to see it's closed
+                    // onBack(); 
+                } else {
+                    const errorMsg = await response.json();
+                    toast.error(errorMsg);
                 }
             } catch (err) {
                 console.error(err);
@@ -95,22 +142,46 @@ const EventManager = ({ event, onBack }) => {
         }
     };
 
-    const markPresent = async (signup_id, hours) => {
+    const handleAttendanceUpdate = async (signup_id, status, check_in, check_out) => {
         try {
-            await fetch(`http://localhost:5000/signups/${signup_id}`, {
+            const body = { status, check_in, check_out };
+            const response = await fetch(`http://localhost:5000/signups/${signup_id}`, {
                 method: "PUT",
                 headers: { 
                     "Content-Type": "application/json",
                     "token": localStorage.getItem("token") 
                 },
-                body: JSON.stringify({ status: "attended", hours_awarded: hours })
+                body: JSON.stringify(body)
             });
-            setAttendees(attendees.map(att => 
-                att.signup_id === signup_id ? { ...att, status: "attended", hours_awarded: hours } : att
-            ));
+
+            if (response.ok) {
+                toast.success("💾 Attendance Saved");
+                const res = await fetch(`http://localhost:5000/events/${event.event_id}/attendees`, {
+                    headers: { token: localStorage.getItem("token") }
+                });
+                const updatedList = await res.json();
+                setAttendees(updatedList);
+            } else {
+                toast.error("Failed to save attendance");
+            }
         } catch (err) {
             console.error(err);
         }
+    };
+
+    // Helper for Display Mode
+    const formatDisplayDate = (start, end) => {
+        const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+        const timeOptions = { hour: '2-digit', minute: '2-digit' };
+        
+        const startDate = new Date(start);
+        const dateStr = startDate.toLocaleDateString(undefined, dateOptions);
+        const startTime = startDate.toLocaleTimeString(undefined, timeOptions);
+
+        if (!end) return `${dateStr} at ${startTime}`;
+
+        const endTime = new Date(end).toLocaleTimeString(undefined, timeOptions);
+        return `${dateStr} | ${startTime} - ${endTime}`;
     };
 
     return (
@@ -119,74 +190,95 @@ const EventManager = ({ event, onBack }) => {
                 ← Back to Dashboard
             </button>
             
-            {/* --- EVENT DETAILS SECTION --- */}
             <div style={{ borderBottom: "1px solid #eee", paddingBottom: "20px", marginBottom: "30px" }}>
-                
-                {/* Header with Buttons */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                     
-                    {/* View Mode vs Edit Mode Logic */}
                     {isEditing ? (
+                        /* --- EDIT MODE --- */
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
+                            <label style={{fontSize: "0.8rem", color: "#666"}}>Event Title</label>
                             <input 
                                 name="title" value={editData.title} onChange={handleEditChange} 
                                 style={{ fontSize: "1.5rem", padding: "5px" }} 
                             />
-                            <div style={{ display: "flex", gap: "10px" }}>
-                                <input 
-                                    type="datetime-local" name="event_date" value={editData.event_date} onChange={handleEditChange} 
-                                    style={{ padding: "5px" }} 
-                                />
-                                <input 
-                                    name="location" value={editData.location} onChange={handleEditChange} 
-                                    style={{ padding: "5px", flex: 1 }} 
-                                />
+                            
+                            <div style={{ display: "flex", gap: "20px" }}>
+                                <div style={{display: "flex", flexDirection: "column"}}>
+                                    <label style={{fontSize: "0.8rem", color: "#666"}}>Start Time</label>
+                                    <input 
+                                        type="datetime-local" name="event_date" value={editData.event_date} onChange={handleEditChange} 
+                                        style={{ padding: "5px" }} 
+                                    />
+                                </div>
+                                <div style={{display: "flex", flexDirection: "column"}}>
+                                    <label style={{fontSize: "0.8rem", color: "#666"}}>End Time</label>
+                                    <input 
+                                        type="datetime-local" name="event_end" value={editData.event_end} onChange={handleEditChange} 
+                                        style={{ padding: "5px" }} 
+                                    />
+                                </div>
                             </div>
+
+                            <label style={{fontSize: "0.8rem", color: "#666"}}>Location</label>
+                            <input 
+                                name="location" value={editData.location} onChange={handleEditChange} 
+                                style={{ padding: "5px", flex: 1 }} 
+                            />
+                            
+                            <label style={{fontSize: "0.8rem", color: "#666"}}>Description</label>
                             <textarea 
                                 name="description" value={editData.description} onChange={handleEditChange} 
                                 rows="3" style={{ padding: "5px", resize: "vertical" }} 
                             />
                             
                             <div style={{ marginTop: "10px" }}>
-                                <button onClick={saveChanges} style={{ backgroundColor: "#28a745", color: "white", padding: "8px 15px", border: "none", borderRadius: "5px", cursor: "pointer", marginRight: "10px" }}>Save</button>
+                                <button onClick={saveChanges} style={{ backgroundColor: "#FF5E17", color: "white", padding: "8px 15px", border: "none", borderRadius: "5px", cursor: "pointer", marginRight: "10px" }}>Save Changes</button>
                                 <button onClick={() => setIsEditing(false)} style={{ backgroundColor: "#6c757d", color: "white", padding: "8px 15px", border: "none", borderRadius: "5px", cursor: "pointer" }}>Cancel</button>
                             </div>
                         </div>
                     ) : (
+                        /* --- VIEW MODE (UPDATED to use displayEvent) --- */
                         <div>
-                            <h1 style={{ margin: "0 0 10px 0", color: "#4A90E2" }}>{event.title}</h1>
-                            <p style={{ color: "#666", margin: "5px 0" }}>
-                                📍 <strong>{event.location}</strong> | 📅 {new Date(event.event_date).toLocaleString()}
+                            {/* NOTE: We now use displayEvent instead of event */}
+                            <h1 style={{ margin: "0 0 10px 0", color: "#FF5E17" }}>{displayEvent.title}</h1>
+                            <p style={{ color: "#666", margin: "5px 0", fontSize: "1.1rem" }}>
+                                📅 <strong>{formatDisplayDate(displayEvent.event_date, displayEvent.event_end)}</strong>
                             </p>
-                            <p style={{ marginTop: "15px", lineHeight: "1.5" }}>{event.description}</p>
+                            <p style={{ color: "#666", margin: "5px 0" }}>
+                                📍 {displayEvent.location}
+                            </p>
+                            <p style={{ marginTop: "15px", lineHeight: "1.5" }}>{displayEvent.description}</p>
                         </div>
                     )}
 
-                    {/* Action Buttons (Only show in View Mode) */}
                     {!isEditing && (
-                        <div style={{ display: "flex", gap: "10px" }}>
-                            {/* Logic: If NOT completed, show the Complete Button. If completed, show a status. */}
-                            {!event.is_completed ? (
+                        <div style={{ display: "flex", gap: "10px", flexDirection: "column", alignItems: "flex-end" }}>
+                            <div style={{display: "flex", gap: "10px"}}>
+                                {!displayEvent.is_completed ? (
+                                    <button 
+                                        onClick={handleComplete}
+                                        style={{ backgroundColor: "#17a2b8", color: "white", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
+                                    >
+                                        ✅ Finish Event
+                                    </button>
+                                ) : (
+                                    <span style={{ padding: "8px 15px", border: "2px solid #FF5E17", color: "#FF5E17", borderRadius: "5px", fontWeight: "bold", backgroundColor: "#e9f7ef" }}>
+                                        Event Closed
+                                    </span>
+                                )}
+
                                 <button 
-                                    onClick={handleComplete}
-                                    style={{ backgroundColor: "#17a2b8", color: "white", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
+                                    onClick={() => setIsEditing(true)}
+                                    disabled={displayEvent.is_completed}
+                                    style={{ backgroundColor: displayEvent.is_completed ? "#ccc" : "#ffc107", color: "black", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
                                 >
-                                    ✅ Complete Event
+                                    ✏️ Edit
                                 </button>
-                            ) : (
-                                <span style={{ padding: "8px 15px", border: "2px solid #28a745", color: "#28a745", borderRadius: "5px", fontWeight: "bold", backgroundColor: "#e9f7ef" }}>
-                                    Event Closed
-                                </span>
-                            )}
-                            <button 
-                                onClick={() => setIsEditing(true)}
-                                style={{ backgroundColor: "#ffc107", color: "black", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
-                            >
-                                ✏️ Edit
-                            </button>
+                            </div>
+                            
                             <button 
                                 onClick={handleDelete}
-                                style={{ backgroundColor: "#dc3545", color: "white", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
+                                style={{ backgroundColor: "#dc3545", color: "white", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", width: "100%" }}
                             >
                                 🗑️ Delete
                             </button>
@@ -195,7 +287,6 @@ const EventManager = ({ event, onBack }) => {
                 </div>
             </div>
 
-            {/* --- VOLUNTEER TABLE SECTION --- */}
             <h3>Volunteer Attendance</h3>
             {isLoading ? <p>Loading volunteers...</p> : (
                 <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "15px" }}>
@@ -207,34 +298,19 @@ const EventManager = ({ event, onBack }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {attendees.length === 0 ? <tr><td colSpan="3" style={{padding:"20px", textAlign:"center", color: "#888"}}>No volunteers have signed up yet.</td></tr> : 
-                        attendees.map(person => (
-                            <tr key={person.signup_id} style={{ borderBottom: "1px solid #eee" }}>
-                                <td style={{ padding: "12px" }}>
-                                    <strong>{person.full_name}</strong><br/>
-                                    <small style={{color:"#888"}}>{person.email}</small>
-                                </td>
-                                <td style={{ padding: "12px" }}>
-                                    <span style={{ 
-                                        padding: "5px 12px", borderRadius: "20px", fontSize: "0.85rem", fontWeight: "bold",
-                                        backgroundColor: person.status === 'attended' ? '#d4edda' : '#e2e3e5',
-                                        color: person.status === 'attended' ? '#155724' : '#383d41'
-                                    }}>
-                                        {person.status === 'attended' ? '✅ Completed' : 'Registered'}
-                                    </span>
-                                </td>
-                                <td style={{ padding: "12px" }}>
-                                    {person.status !== 'attended' && (
-                                        <button 
-                                            onClick={() => markPresent(person.signup_id, 4)} 
-                                            style={{ backgroundColor: "#28a745", color: "white", border: "none", padding: "6px 12px", borderRadius: "4px", cursor: "pointer" }}
-                                        >
-                                            Mark Present
-                                        </button>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
+                        {attendees.length === 0 ? (
+                            <tr><td colSpan="3" style={{padding:"20px", textAlign:"center", color: "#888"}}>No volunteers have signed up yet.</td></tr>
+                        ) : (
+                            attendees.map(person => (
+                                <VolunteerRow 
+                                    key={person.signup_id} 
+                                    attendee={person} 
+                                    eventDate={displayEvent.event_date} 
+                                    eventEnd={displayEvent.event_end}
+                                    onUpdate={handleAttendanceUpdate} 
+                                />
+                            ))
+                        )}
                     </tbody>
                 </table>
             )}
