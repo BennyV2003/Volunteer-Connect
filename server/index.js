@@ -155,17 +155,26 @@ app.post("/events", authorization, async (req, res) => {
     }
 });
 
-// Get All Events (With "Spots Filled" Count)
+// Get all events (Includes Organizer Name + Volunteer Count)
 app.get("/events", async (req, res) => {
     try {
         const allEvents = await pool.query(
-            `SELECT events.*, 
-                    users.full_name as organizer, 
-                    (SELECT COUNT(*)::int FROM signups WHERE signups.event_id = events.event_id) as current_count 
-             FROM events 
-             JOIN users ON events.organizer_id = users.user_id`
+            `SELECT 
+                e.*, 
+                u.full_name as organizer_name,
+                (SELECT COUNT(*) FROM signups s WHERE s.event_id = e.event_id) as current_count
+             FROM events e
+             JOIN users u ON e.organizer_id = u.user_id
+             ORDER BY e.event_date ASC`
         );
-        res.json(allEvents.rows);
+        
+        // Ensure current_count is a number (Postgres sometimes returns strings for counts)
+        const formattedEvents = allEvents.rows.map(event => ({
+            ...event,
+            current_count: parseInt(event.current_count)
+        }));
+
+        res.json(formattedEvents);
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
@@ -359,15 +368,16 @@ app.get("/my-signups", authorization, async (req, res) => {
     try {
         const volunteer_id = req.user.user_id;
 
-        // FIXED: Added check_in_time and check_out_time
         const mySignups = await pool.query(
             `SELECT events.*, 
                     signups.status, 
                     signups.hours_awarded, 
                     signups.check_in_time, 
-                    signups.check_out_time 
+                    signups.check_out_time,
+                    users.full_name as organizer_name 
              FROM signups 
              JOIN events ON signups.event_id = events.event_id 
+             JOIN users ON events.organizer_id = users.user_id 
              WHERE signups.volunteer_id = $1 
              ORDER BY events.event_date ASC`,
             [volunteer_id]
@@ -393,6 +403,43 @@ app.delete("/events/:id/signup", authorization, async (req, res) => {
         );
 
         res.json("Unregistered successfully");
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// GET LEADERBOARD DATA (FIXED)
+app.get("/leaderboard", async (req, res) => {
+    try {
+        // 1. FIX: Select 'full_name' instead of first/last
+        const leaderboard = await pool.query(
+            `SELECT 
+                u.full_name, 
+                COUNT(s.signup_id) as event_count, 
+                COALESCE(SUM(s.hours_awarded), 0) as total_hours 
+             FROM users u 
+             JOIN signups s ON u.user_id = s.volunteer_id 
+             WHERE s.status = 'attended' 
+             GROUP BY u.user_id, u.full_name
+             ORDER BY total_hours DESC`
+        );
+        
+        // 2. FIX: Manually split the full name into "First L."
+        const formattedData = leaderboard.rows.map(row => {
+            const nameParts = row.full_name.trim().split(" ");
+            const firstName = nameParts[0];
+            // If they have a last name, get the first letter. Otherwise leave blank.
+            const lastInitial = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0) : "";
+            
+            return {
+                name: `${firstName} ${lastInitial}.`,
+                event_count: parseInt(row.event_count),
+                total_hours: parseFloat(row.total_hours)
+            };
+        });
+
+        res.json(formattedData);
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
