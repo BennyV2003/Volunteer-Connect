@@ -374,7 +374,9 @@ app.get("/my-signups", authorization, async (req, res) => {
                     signups.hours_awarded, 
                     signups.check_in_time, 
                     signups.check_out_time,
-                    users.full_name as organizer_name 
+                    users.full_name as organizer_name,
+                    -- NEW LINE BELOW: Calculates total signups for this event
+                    (SELECT COUNT(*) FROM signups s2 WHERE s2.event_id = events.event_id) AS current_count
              FROM signups 
              JOIN events ON signups.event_id = events.event_id 
              JOIN users ON events.organizer_id = users.user_id 
@@ -440,6 +442,65 @@ app.get("/leaderboard", async (req, res) => {
         });
 
         res.json(formattedData);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// 1. POST A REVIEW
+app.post("/events/:id/reviews", authorization, async (req, res) => {
+    try {
+        const event_id = req.params.id;
+        const { rating, comment } = req.body;
+        const user_id = req.user.user_id; // From token
+
+        const newReview = await pool.query(
+            "INSERT INTO reviews (event_id, user_id, rating, comment) VALUES ($1, $2, $3, $4) RETURNING *",
+            [event_id, user_id, rating, comment]
+        );
+        res.json(newReview.rows[0]);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// 2. GET REVIEWS FOR AN EVENT
+app.get("/events/:id/reviews", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const reviews = await pool.query(
+            `SELECT r.*, u.full_name 
+             FROM reviews r 
+             JOIN users u ON r.user_id = u.user_id 
+             WHERE r.event_id = $1 
+             ORDER BY r.created_at DESC`,
+            [id]
+        );
+        res.json(reviews.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// GET all reviews for a specific event
+app.get("/events/:id/reviews", authorization, async (req, res) => {
+    try {
+        const { id } = req.params; // The event_id
+
+        // We JOIN with the users table to get the name of the reviewer
+        const reviews = await pool.query(
+            `SELECT r.rating, r.comment, r.created_at, u.user_name 
+             FROM reviews AS r
+             JOIN users AS u ON r.user_id = u.user_id
+             WHERE r.event_id = $1
+             ORDER BY r.created_at DESC`,
+            [id]
+        );
+
+        res.json(reviews.rows);
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");

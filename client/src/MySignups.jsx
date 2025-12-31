@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { toast } from 'react-toastify';
-import jsPDF from "jspdf"; // <--- IMPORT THIS
+import jsPDF from "jspdf"; 
+import ReviewsModal from "./ReviewsModal"; 
 
-const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => { // <--- ACCEPT userName PROP
+const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
     const [signups, setSignups] = useState([]);
+    const [selectedReviewEvent, setSelectedReviewEvent] = useState(null); 
+    const [viewingReviews, setViewingReviews] = useState([]); 
+    const [showViewReviewsModal, setShowViewReviewsModal] = useState(false);
 
     useEffect(() => {
         getSignups();
@@ -21,9 +25,26 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => { // <-
         }
     };
 
+    const handleSeeReviews = async (eventId) => {
+        try {
+            const response = await fetch(`http://localhost:5000/events/${eventId}/reviews`, {
+                headers: { token: localStorage.getItem("token") }
+            });
+            
+            if (response.ok) {
+                const jsonData = await response.json();
+                setViewingReviews(jsonData); 
+                setShowViewReviewsModal(true); 
+            } else {
+                toast.error("Could not fetch reviews");
+            }
+        } catch (err) {
+            console.error(err.message);
+        }
+    };
+
     const handleUnregister = async (eventId) => {
         if (!confirm("Are you sure you want to unregister from this event?")) return;
-
         try {
             const response = await fetch(`http://localhost:5000/events/${eventId}/signup`, {
                 method: "DELETE",
@@ -43,99 +64,25 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => { // <-
         }
     };
 
-    // --- CERTIFICATE GENERATOR ---
     const generateCertificate = (event) => {
-        const doc = new jsPDF({
-            orientation: "landscape",
-            unit: "mm",
-            format: "a4"
-        });
-
-        // -- STYLING VARIABLES --
+        const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
         const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
         const center = pageWidth / 2;
-        const orangeColor = [255, 94, 23]; // UTRGV Orange
+        const orangeColor = [255, 94, 23];
         const darkColor = [60, 60, 60];
 
-        // 1. Decorative Border (Double Rectangle)
-        doc.setLineWidth(2);
-        doc.setDrawColor(...orangeColor);
-        doc.rect(10, 10, pageWidth - 20, pageHeight - 20); // Outer Orange
-        
-        doc.setLineWidth(1);
-        doc.setDrawColor(200, 200, 200);
-        doc.rect(15, 15, pageWidth - 30, pageHeight - 30); // Inner Grey
-
-        // 2. Header
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(40);
-        doc.setTextColor(...orangeColor);
+        doc.setLineWidth(2); doc.setDrawColor(...orangeColor); doc.rect(10, 10, pageWidth - 20, 190);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(40); doc.setTextColor(...orangeColor);
         doc.text("Certificate of Service", center, 50, { align: "center" });
-
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(16);
-        doc.setTextColor(...darkColor);
-        doc.text("This certificate is proudly presented to", center, 70, { align: "center" });
-
-        // 3. Volunteer Name (The Star!)
-        doc.setFont("times", "bolditalic");
-        doc.setFontSize(36);
-        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(16); doc.setTextColor(...darkColor);
+        doc.text("Presented to", center, 70, { align: "center" });
+        doc.setFont("times", "bolditalic"); doc.setFontSize(36); doc.setTextColor(0, 0, 0);
         doc.text(userName || "Volunteer Name", center, 90, { align: "center" });
-        
-        // Underline the name
-        doc.setLineWidth(0.5);
-        doc.setDrawColor(100, 100, 100);
-        doc.line(center - 60, 92, center + 60, 92);
-
-        // 4. Body Text
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(14);
-        doc.setTextColor(...darkColor);
-        
-        const hours = Number(event.hours_awarded).toFixed(1);
-        const text = `For honestly and faithfully volunteering ${hours} hours of service at the event:`;
-        doc.text(text, center, 115, { align: "center" });
-
-        // 5. Event Details
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(22);
-        doc.setTextColor(...orangeColor);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(14); doc.setTextColor(...darkColor);
+        doc.text(`For volunteering ${Number(event.hours_awarded).toFixed(1)} hours at:`, center, 115, { align: "center" });
+        doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(...orangeColor);
         doc.text(event.title, center, 130, { align: "center" });
-
-        doc.setFont("helvetica", "italic");
-        doc.setFontSize(14);
-        doc.setTextColor(...darkColor);
-        const dateStr = new Date(event.event_date).toLocaleDateString(undefined, {
-            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-        });
-        doc.text(`On ${dateStr}`, center, 140, { align: "center" });
-
-        // 6. Signatures Section (Bottom)
-        const sigY = 170;
-        
-        // Left Signature (Organizer)
-        doc.setLineWidth(0.5);
-        doc.line(40, sigY, 110, sigY); // Line
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.text(event.organizer_name || "Organizer", 75, sigY + 8, { align: "center" });
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(10);
-        doc.text("Event Organizer", 75, sigY + 14, { align: "center" });
-
-        // Right Signature (Platform)
-        doc.line(pageWidth - 110, sigY, pageWidth - 40, sigY); // Line
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.text("VolunteerConnect", pageWidth - 75, sigY + 8, { align: "center" });
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(10);
-        doc.text("Verified Platform Partner", pageWidth - 75, sigY + 14, { align: "center" });
-
-        // 7. Save File
-        doc.save(`${event.title.replace(/\s+/g, '_')}_Certificate.pdf`);
+        doc.save(`${event.title}_Certificate.pdf`);
     };
 
     const formatEventTime = (startString, endString) => {
@@ -153,96 +100,149 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => { // <-
     const activeEvents = signups.filter(event => !event.is_completed);
     const completedEvents = signups.filter(event => event.is_completed);
 
+    const actionBtnStyle = {
+        padding: "10px 16px",
+        border: "none",
+        borderRadius: "5px",
+        cursor: "pointer",
+        fontWeight: "bold",
+        fontSize: "0.9rem",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "8px",
+        width: "100%"
+    };
+
     return (
-        <div style={{ marginBottom: "50px", marginTop: "40px" }}>
+        <div style={{ marginBottom: "50px", marginTop: "40px", maxWidth: "1000px", margin: "0 auto" }}>
             
-            {/* ACTIVE EVENTS SECTION */}
-            <h2 style={{ color: "#FF5E17", borderBottom: "2px solid #FF5E17", paddingBottom: "10px" }}>
+            {/* --- ACTIVE EVENTS --- */}
+            <h2 style={{ color: "#FF5E17", borderBottom: "2px solid #FF5E17", paddingBottom: "10px", marginTop: "40px" }}>
                 ✅ My Registered Events
             </h2>
             
             {activeEvents.length === 0 ? (
                 <p style={{ color: "#666", marginBottom: "30px" }}>You have no active registrations.</p>
             ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "20px", marginTop: "20px", marginBottom: "40px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "20px", marginBottom: "40px" }}>
                     {activeEvents.map(event => (
                         <div key={event.event_id} style={{ 
-                            backgroundColor: "white", padding: "20px", borderRadius: "10px", 
-                            boxShadow: "0 2px 8px rgba(0,0,0,0.1)", borderLeft: "5px solid #28a745", 
-                            display: "flex", flexDirection: "column", justifyContent: "space-between"
+                            backgroundColor: "white", padding: "25px", borderRadius: "10px", 
+                            boxShadow: "0 2px 10px rgba(0,0,0,0.08)", borderLeft: "6px solid #28a745", 
+                            display: "flex", justifyContent: "space-between", alignItems: "center", gap: "20px"
                         }}>
-                            <div>
-                                <h3 style={{ margin: "0 0 10px 0", color: "#28a745" }}>{event.title}</h3>
-                                <p style={{ color: "#555", fontSize: "0.9rem", margin: "5px 0" }}>
-                                    <strong>Organized by:</strong> {event.organizer_name}
-                                </p>
-                                <p style={{ color: "#555", fontSize: "0.9rem", margin: "5px 0" }}>
-                                    <strong>Status:</strong> <span style={{fontWeight: "bold", color: "#28a745"}}>Registered</span>
-                                </p>
-                                <p style={{ margin: "10px 0", color: "#333", lineHeight: "1.4" }}>{event.description}</p>
-                                <div style={{ marginTop: "15px", fontSize: "0.9rem", color: "#666", display: "flex", flexDirection: "column", gap: "5px" }}>
+                            <div style={{ flex: 1 }}>
+                                
+                                {/* TITLE + CAPACITY ROW */}
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" }}>
+                                    <h3 style={{ margin: "0", color: "#28a745" }}>{event.title}</h3>
+                                    
+                                    {/* --- NEW: CAPACITY BADGE --- */}
+                                    {event.capacity > 0 && (
+                                        <span style={{ 
+                                            fontSize: "0.8rem", padding: "4px 10px", borderRadius: "15px", 
+                                            backgroundColor: event.current_count >= event.capacity ? "#dc3545" : "#e9ecef", 
+                                            color: event.current_count >= event.capacity ? "white" : "#495057", 
+                                            fontWeight: "bold" 
+                                        }}>
+                                            👥 {event.current_count || 0} / {event.capacity} Filled
+                                        </span>
+                                    )}
+                                </div>
+
+                                <p style={{ color: "#555", fontSize: "0.9rem", margin: "5px 0" }}><strong>Organized by:</strong> {event.organizer_name}</p>
+                                <p style={{ color: "#555", fontSize: "0.9rem", margin: "5px 0" }}><strong>Status:</strong> <span style={{fontWeight: "bold", color: "#28a745"}}>Registered</span></p>
+                                <p style={{ margin: "10px 0", color: "#333", lineHeight: "1.4", maxWidth: "95%" }}>{event.description}</p>
+                                <div style={{ marginTop: "15px", fontSize: "0.9rem", color: "#666", display: "flex", gap: "20px" }}>
                                     <span>📍 {event.location}</span>
                                     <span>📅 {formatEventTime(event.event_date, event.event_end)}</span>
                                 </div>
                             </div>
-                            <button onClick={() => handleUnregister(event.event_id)} style={{ marginTop: "20px", width: "100%", padding: "10px", backgroundColor: "white", color: "#dc3545", border: "1px solid #dc3545", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>
-                                Unregister
-                            </button>
+
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px", paddingLeft: "25px", borderLeft: "1px solid #eee", minWidth: "200px" }}>
+                                <button onClick={() => handleUnregister(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "white", color: "#dc3545", border: "1px solid #dc3545" }}>
+                                    Unregister
+                                </button>
+                                
+                                <button onClick={() => handleSeeReviews(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#17a2b8", color: "white" }}>
+                                    👀 See Reviews
+                                </button>
+                                <button onClick={() => setSelectedReviewEvent(event)} style={{ ...actionBtnStyle, backgroundColor: "#ffc107", color: "black" }}>
+                                    ⭐ Write Review
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
             )}
 
-            {/* COMPLETED EVENTS SECTION */}
+            {/* --- PAST EVENTS --- */}
             {completedEvents.length > 0 && (
                 <div style={{ marginTop: "50px" }}>
                     <h2 style={{ color: "#6c757d", borderBottom: "2px solid #6c757d", paddingBottom: "10px" }}>
-                        📜 My Completed Events
+                        📜 My Past Events
                     </h2>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "20px", marginTop: "20px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "20px" }}>
                         {completedEvents.map(event => (
                             <div key={event.event_id} style={{ 
-                                backgroundColor: "white", padding: "20px", borderRadius: "10px", 
-                                boxShadow: "0 2px 8px rgba(0,0,0,0.1)", borderLeft: "5px solid #6c757d", 
-                                display: "flex", flexDirection: "column", justifyContent: "space-between"
+                                backgroundColor: "white", padding: "25px", borderRadius: "10px", 
+                                boxShadow: "0 2px 10px rgba(0,0,0,0.08)", borderLeft: "6px solid #6c757d",
+                                display: "flex", justifyContent: "space-between", alignItems: "center", gap: "20px"
                             }}>
-                                <div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                                        <h3 style={{ margin: "0 0 10px 0", color: "#6c757d" }}>{event.title}</h3>
-                                        {event.status === 'attended' ? (
-                                            <span style={{ backgroundColor: "#00246B", color: "white", padding: "3px 10px", borderRadius: "10px", fontSize: "0.8rem", fontWeight: "bold" }}>
-                                                Attended (+{Number(event.hours_awarded || 0)} Hrs)
-                                            </span>
-                                        ) : (
-                                            <span style={{ backgroundColor: "#6c757d", color: "white", padding: "3px 10px", borderRadius: "10px", fontSize: "0.8rem", fontWeight: "bold" }}>
-                                                {event.status || "Completed"}
-                                            </span>
-                                        )}
+                                <div style={{ flex: 1 }}> 
+                                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" }}>
+                                        <h3 style={{ margin: 0, color: "#333", fontSize: "1.4rem" }}>{event.title}</h3>
+                                        <span style={{ backgroundColor: event.status === 'attended' ? "#28a745" : "#6c757d", color: "white", padding: "4px 10px", borderRadius: "15px", fontSize: "0.8rem", fontWeight: "bold" }}>
+                                            {event.status === 'attended' ? `Attended (+${Number(event.hours_awarded || 0)} Hrs)` : (event.status || "Completed")}
+                                        </span>
                                     </div>
-                                    <p style={{ color: "#555", fontSize: "0.9rem", margin: "5px 0" }}>
-                                        <strong>Organized by:</strong> {event.organizer_name}
-                                    </p>
-                                    <p style={{ margin: "10px 0", color: "#333", lineHeight: "1.4" }}>{event.description}</p>
-                                    <div style={{ marginTop: "15px", fontSize: "0.9rem", color: "#666", display: "flex", flexDirection: "column", gap: "5px" }}>
-                                        <span>📍 {event.location}</span>
+                                    <p style={{ margin: "0 0 10px 0", color: "#666", fontSize: "0.9rem" }}>Organized by <strong>{event.organizer_name}</strong></p>
+                                    <p style={{ color: "#555", lineHeight: "1.6", marginBottom: "15px", maxWidth: "95%" }}>{event.description}</p>
+                                    <div style={{ display: "flex", gap: "20px", color: "#777", fontSize: "0.95rem" }}>
                                         <span>📅 {formatEventTime(event.event_date, event.event_end)}</span>
+                                        <span>📍 {event.location}</span>
                                     </div>
                                 </div>
 
-                                {/* PRINT CERTIFICATE BUTTON */}
                                 {event.status === 'attended' && (
-                                    <button 
-                                        onClick={() => generateCertificate(event)}
-                                        style={{ 
-                                            marginTop: "20px", width: "100%", padding: "10px", 
-                                            backgroundColor: "#00246B", color: "white", 
-                                            border: "none", borderRadius: "5px", 
-                                            cursor: "pointer", fontWeight: "bold" 
-                                        }}
-                                    >
-                                        🖨️ Print Certificate
-                                    </button>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "10px", paddingLeft: "25px", borderLeft: "1px solid #eee", minWidth: "200px" }}>
+                                        <button onClick={() => generateCertificate(event)} style={{ ...actionBtnStyle, backgroundColor: "#007bff", color: "white" }}>
+                                            🖨️ Print Certificate
+                                        </button>
+                                        <button onClick={() => handleSeeReviews(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#17a2b8", color: "white" }}>
+                                            👀 See Reviews
+                                        </button>
+                                        <button onClick={() => setSelectedReviewEvent(event)} style={{ ...actionBtnStyle, backgroundColor: "#ffc107", color: "black" }}>
+                                            ⭐ Write Review
+                                        </button>
+                                    </div>
                                 )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            
+            {/* MODALS */}
+            {selectedReviewEvent && (
+                <ReviewsModal event={selectedReviewEvent} userName={userName} onClose={() => setSelectedReviewEvent(null)} />
+            )}
+            {showViewReviewsModal && (
+                <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}>
+                    <div style={{ backgroundColor: "white", padding: "20px", borderRadius: "8px", width: "500px", maxWidth: "90%", maxHeight: "80vh", overflowY: "auto" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "20px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
+                            <h3 style={{ margin: 0, color: "#333" }}>Event Reviews</h3>
+                            <button onClick={() => setShowViewReviewsModal(false)} style={{ background: "none", border: "none", fontSize: "1.5rem", cursor: "pointer" }}>&times;</button>
+                        </div>
+                        {viewingReviews.length === 0 ? <p style={{ textAlign: "center", color: "#666" }}>No reviews yet.</p> : viewingReviews.map((review, index) => (
+                            <div key={index} style={{ borderBottom: "1px solid #eee", paddingBottom: "15px", marginBottom: "15px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+                                    <strong style={{ fontSize: "1.05rem" }}>{review.user_name || "Volunteer"}</strong>
+                                    <span style={{ color: "#FFD700", fontSize: "1.2rem" }}>{"★".repeat(review.rating)}</span>
+                                </div>
+                                <p style={{ margin: "5px 0", color: "#555", lineHeight: "1.4" }}>"{review.comment}"</p>
+                                <small style={{ color: "#999" }}>{new Date(review.created_at).toLocaleDateString()}</small>
                             </div>
                         ))}
                     </div>

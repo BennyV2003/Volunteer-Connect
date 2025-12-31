@@ -6,6 +6,7 @@ const OrgDashboard = () => {
     const [events, setEvents] = useState([]);
     const [selectedEvent, setSelectedEvent] = useState(null);
     
+    // --- FORM STATE ---
     const [inputs, setInputs] = useState({
         title: "",
         date: "",        
@@ -18,16 +19,20 @@ const OrgDashboard = () => {
 
     const { title, date, startTime, endTime, location, capacity, description } = inputs;
 
+    // --- 1. HANDLE INPUT CHANGES ---
     const onChange = (e) => {
         setInputs({ ...inputs, [e.target.name]: e.target.value });
     };
 
+    // --- 2. SUBMIT FORM (CREATE EVENT) ---
     const onSubmitForm = async (e) => {
         e.preventDefault();
         
+        // Combine Date + Time for Postgres (YYYY-MM-DDTHH:MM)
         const finalStart = `${date}T${startTime}`;
         const finalEnd = `${date}T${endTime}`;
 
+        // Validation: End time after Start time
         if (new Date(finalEnd) <= new Date(finalStart)) {
             toast.error("❌ End time must be after start time");
             return;
@@ -54,6 +59,7 @@ const OrgDashboard = () => {
 
             if (response.ok) {
                 toast.success("🎉 New event created successfully!"); 
+                // Reset Form
                 setInputs({
                     title: "",
                     date: "",
@@ -63,7 +69,7 @@ const OrgDashboard = () => {
                     capacity: "",
                     description: ""
                 });
-                getEvents(); 
+                getEvents(); // Refresh the list
             } else {
                 const errorText = await response.text();
                 toast.error(`Error: ${errorText}`);
@@ -74,6 +80,7 @@ const OrgDashboard = () => {
         }
     };
 
+    // --- 3. GET EVENTS ---
     const getEvents = async () => {
         try {
             const response = await fetch("http://localhost:5000/my-events", {
@@ -90,6 +97,7 @@ const OrgDashboard = () => {
         getEvents();
     }, []);
 
+    // --- HELPER: Date Formatting ---
     const formatListDate = (startString, endString) => {
         const start = new Date(startString);
         const dateOptions = { month: 'short', day: 'numeric', year: 'numeric' };
@@ -105,6 +113,7 @@ const OrgDashboard = () => {
         return `${dateText} | ${startTime} - ${endTime}`;
     };
 
+    // --- FILTERING ---
     const now = new Date();
     const upcomingEvents = events.filter(event => 
         new Date(event.event_date) >= now && !event.is_completed
@@ -114,6 +123,7 @@ const OrgDashboard = () => {
         new Date(event.event_date) < now || event.is_completed
     );
 
+    // --- MASTER / DETAIL VIEW SWITCH ---
     if (selectedEvent) {
         return (
             <EventManager 
@@ -137,13 +147,12 @@ const OrgDashboard = () => {
     };
 
     const labelStyle = { display: "block", marginBottom: "8px", fontWeight: "bold", fontSize: "0.9rem", color: "#333" };
-    // box-sizing: border-box ensures padding doesn't break the width
     const inputStyle = { width: "100%", padding: "12px", borderRadius: "5px", border: "1px solid #ccc", fontSize: "1rem", boxSizing: "border-box" };
     
     const eventItemStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px", border: "1px solid #eee", borderRadius: "8px", backgroundColor: "white", boxShadow: "0 2px 5px rgba(0,0,0,0.05)" };
 
+    // --- RENDER ---
     return (
-        // Added Wrapper to keep it centered and consistent width
         <div style={{ width: "100%", maxWidth: "1000px", margin: "0 auto" }}>
             
             {/* CREATE EVENT CARD */}
@@ -204,7 +213,7 @@ const OrgDashboard = () => {
             {/* --- MY EVENT MANAGEMENT --- */}
             <h2 style={{ color: "#333", marginBottom: "20px" }}>My Event Management</h2>
             
-            {/* UTRGV ORANGE HEADER */}
+            {/* UPCOMING EVENTS */}
             <h3 style={{ color: "#FF5E17", borderBottom: "2px solid #FF5E17", paddingBottom: "10px" }}>
                 🚀 Upcoming Events
             </h3>
@@ -223,7 +232,6 @@ const OrgDashboard = () => {
                                     📍 {event.location}
                                 </p>
                             </div>
-                            {/* UTRGV ORANGE BUTTON */}
                             <button 
                                 onClick={() => setSelectedEvent(event)}
                                 style={{ backgroundColor: "#FF5E17", color: "white", border: "none", padding: "8px 20px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
@@ -235,6 +243,7 @@ const OrgDashboard = () => {
                 </div>
             )}
 
+            {/* PAST EVENTS */}
             <h3 style={{ color: "#666", borderBottom: "2px solid #ccc", paddingBottom: "10px" }}>
                 📜 Past Events
             </h3>
