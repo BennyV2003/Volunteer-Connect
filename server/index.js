@@ -60,7 +60,7 @@ app.post("/register", async (req, res) => {
         );
 
         // 4. Generate a Token (The "Badge")
-        const token = jwt.sign({ user_id: newUser.rows[0].user_id }, "secretKey123", { expiresIn: "1h" });
+        const token = jwt.sign({ user_id: newUser.rows[0].user_id }, process.env.jwtSecret, { expiresIn: "1h" });
 
         // 5. Send back the token
         res.json({ token });
@@ -93,7 +93,7 @@ app.post("/login", async (req, res) => {
         // 3. Generate Token
         const token = jwt.sign(
             { user_id: user.rows[0].user_id, role: user.rows[0].role }, 
-            "secretKey123", 
+            process.env.jwtSecret, 
             { expiresIn: "1h" }
         );
 

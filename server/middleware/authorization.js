@@ -11,7 +11,7 @@ module.exports = async (req, res, next) => {
         }
 
         // 2. Check if the token is valid
-        const payload = jwt.verify(jwtToken, "secretKey123");
+        const payload = jwt.verify(jwtToken, process.env.jwtSecret);
 
         // 3. If valid, add the user info to the request so we can use it later
         req.user = payload;
