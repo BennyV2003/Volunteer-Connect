@@ -9,10 +9,16 @@ import Leaderboard from "./Leaderboard";
 import { ToastContainer } from 'react-toastify'; 
 import 'react-toastify/dist/ReactToastify.css';
 import { calculateLevelInfo } from "./utils/gamification";
+import ForgotPassword from "./ForgotPassword";
+import ResetPassword from "./ResetPassword";
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
-  const [isLogin, setIsLogin] = useState(true);
+  
+  // CHANGED: We now use a string to track which auth screen to show
+  const [authView, setAuthView] = useState("login"); // "login", "register", "forgot", "reset"
+  const [urlResetToken, setUrlResetToken] = useState("");
+
   const [userName, setUserName] = useState("");
   const [userRole, setUserRole] = useState("");
   const [userStats, setUserStats] = useState({ count: 0, hours: 0 }); 
@@ -21,9 +27,21 @@ function App() {
   // --- GAMIFICATION LOGIC ---
   const levelInfo = calculateLevelInfo(userStats.hours || 0);
 
+  // NEW: Catch the reset link from the URL when the app loads
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path.startsWith("/reset-password/")) {
+      const tokenFromUrl = path.split("/")[2]; // Grabs the token part of the URL
+      setUrlResetToken(tokenFromUrl);
+      setAuthView("reset");
+    }
+  }, []);
+
   const handleAuthSuccess = (newToken) => {
     localStorage.setItem("token", newToken);
     setToken(newToken);
+    // Reset the URL so the reset token disappears from the top bar
+    window.history.replaceState(null, "", "/"); 
   };
 
   const handleLogout = () => {
@@ -33,6 +51,7 @@ function App() {
     setUserRole("");
     setUserStats({ count: 0, hours: 0 });
     setCurrentView("dashboard");
+    setAuthView("login");
   };
 
   useEffect(() => {
@@ -87,12 +106,36 @@ function App() {
       <div className="main-container">
         {!token ? (
           <div className="auth-box">
-            <h2>{isLogin ? "Welcome Back" : "Join Us"}</h2>
-            <p style={{ marginBottom: "20px", color: "#666" }}>{isLogin ? "Login to access your dashboard" : "Create an account to get started"}</p>
-            {isLogin ? <Login setToken={handleAuthSuccess} /> : <Register setToken={handleAuthSuccess} />}
-            <p className="toggle-text" onClick={() => setIsLogin(!isLogin)}>
-              {isLogin ? <>Don't have an account? <span>Sign Up</span></> : <>Already have an account? <span>Login</span></>}
-            </p>
+            
+            {/* AUTHENTICATION ROUTING LOGIC */}
+            {authView === "login" && (
+              <>
+                <h2>Welcome Back</h2>
+                <p style={{ marginBottom: "20px", color: "#666" }}>Login to access your dashboard</p>
+                <Login setToken={handleAuthSuccess} />
+                <p className="toggle-text" onClick={() => setAuthView("register")}>
+                  Don't have an account? <span>Sign Up</span>
+                </p>
+                <p className="toggle-text" onClick={() => setAuthView("forgot")} style={{ marginTop: "-10px" }}>
+                  <span>Forgot Password?</span>
+                </p>
+              </>
+            )}
+
+            {authView === "register" && (
+              <>
+                <h2>Join Us</h2>
+                <p style={{ marginBottom: "20px", color: "#666" }}>Create an account to get started</p>
+                <Register setToken={handleAuthSuccess} />
+                <p className="toggle-text" onClick={() => setAuthView("login")}>
+                  Already have an account? <span>Login</span>
+                </p>
+              </>
+            )}
+
+            {authView === "forgot" && <ForgotPassword setAuthView={setAuthView} />}
+            {authView === "reset" && <ResetPassword resetToken={urlResetToken} setAuthView={setAuthView} />}
+
           </div>
         ) : (
           /* MAIN CONTENT AREA */
@@ -122,7 +165,7 @@ function App() {
                                   <div style={{ 
                                       height: "100%", 
                                       width: `${levelInfo.progressPercent}%`, 
-                                      backgroundColor: levelInfo.tierColor, // <--- Bar changes color based on rank!
+                                      backgroundColor: levelInfo.tierColor,
                                       borderRadius: "10px",
                                       transition: "width 0.5s ease-in-out" 
                                   }}></div>

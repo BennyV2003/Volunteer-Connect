@@ -3,6 +3,7 @@ const cors = require("cors");
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const authorization = require("./middleware/authorization");
 require("dotenv").config();
 
@@ -80,14 +81,14 @@ app.post("/login", async (req, res) => {
         const user = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
         
         if (user.rows.length === 0) {
-            return res.status(401).json("Invalid Credential");
+            return res.status(401).json("Invalid Email");
         }
 
         // 2. Check if the password is correct (Compare raw password vs. Hash)
         const validPassword = await bcrypt.compare(password, user.rows[0].password_hash);
 
         if (!validPassword) {
-            return res.status(401).json("Invalid Credential");
+            return res.status(401).json("Invalid Password");
         }
 
         // 3. Generate Token
@@ -100,6 +101,86 @@ app.post("/login", async (req, res) => {
         // 4. Return Token
         res.json({ token });
 
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// ==========================================
+// FORGOT PASSWORD (Generate Token)
+// ==========================================
+app.post("/forgot-password", async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        // 1. Check if user exists
+        const user = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+        
+        if (user.rows.length === 0) {
+            // NEW: Explicitly tell the user the email wasn't found
+            return res.status(404).json("This email does not exist in our system.");
+        }
+
+        // 2. Generate a secure, random 32-character token
+        const resetToken = crypto.randomBytes(32).toString("hex");
+        
+        // 3. Set expiration time (1 hour from right now)
+        const tokenExpiry = new Date(Date.now() + 60 * 60 * 1000); 
+
+        // 4. Save token to the database for this user
+        await pool.query(
+            "UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE email = $3",
+            [resetToken, tokenExpiry, email]
+        );
+
+        // 5. Simulate sending the email in the terminal (Updated to port 5173!)
+        const resetLink = `http://localhost:5173/reset-password/${resetToken}`;
+        
+        console.log("\n----------------------------------------");
+        console.log(`📧 SIMULATED EMAIL TO: ${email}`);
+        console.log(`Subject: Volunteer Hub - Password Reset Request`);
+        console.log(`Body: Click the link below to reset your password. This link expires in 1 hour.`);
+        console.log(`Link:  ${resetLink}`);
+        console.log("----------------------------------------\n");
+
+        // NEW: Clear success message
+        res.json("Success! A reset link has been sent to your email.");
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// ==========================================
+// RESET PASSWORD (Use Token to set new password)
+// ==========================================
+app.post("/reset-password", async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        // 1. Find user by token AND ensure it hasn't expired
+        // NOW() is a Postgres function that gets the current time
+        const user = await pool.query(
+            "SELECT * FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()",
+            [token]
+        );
+
+        if (user.rows.length === 0) {
+            return res.status(400).json("Invalid or expired reset token. Please request a new one.");
+        }
+
+        // 2. Hash the new password using bcrypt (same as Registration)
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // 3. Update the password and CLEAR the tokens so they can't be used again
+        await pool.query(
+            "UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL WHERE user_id = $2",
+            [hashedPassword, user.rows[0].user_id]
+        );
+
+        res.json("Password has been successfully reset! You can now log in.");
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
