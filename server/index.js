@@ -243,7 +243,8 @@ app.get("/events", async (req, res) => {
             `SELECT 
                 e.*, 
                 u.full_name as organizer_name,
-                (SELECT COUNT(*) FROM signups s WHERE s.event_id = e.event_id) as current_count
+                (SELECT COUNT(*) FROM signups s WHERE s.event_id = e.event_id) as current_count,
+                (SELECT COUNT(*) FROM comments c WHERE c.event_id = e.event_id) as comment_count
              FROM events e
              JOIN users u ON e.organizer_id = u.user_id
              ORDER BY e.event_date ASC`
@@ -252,7 +253,8 @@ app.get("/events", async (req, res) => {
         // Ensure current_count is a number (Postgres sometimes returns strings for counts)
         const formattedEvents = allEvents.rows.map(event => ({
             ...event,
-            current_count: parseInt(event.current_count)
+            current_count: parseInt(event.current_count),
+            comment_count: parseInt(event.comment_count)
         }));
 
         res.json(formattedEvents);
@@ -566,22 +568,49 @@ app.get("/events/:id/reviews", async (req, res) => {
     }
 });
 
-// GET all reviews for a specific event
-app.get("/events/:id/reviews", authorization, async (req, res) => {
-    try {
-        const { id } = req.params; // The event_id
 
-        // We JOIN with the users table to get the name of the reviewer
-        const reviews = await pool.query(
-            `SELECT r.rating, r.comment, r.created_at, u.user_name 
-             FROM reviews AS r
-             JOIN users AS u ON r.user_id = u.user_id
-             WHERE r.event_id = $1
-             ORDER BY r.created_at DESC`,
+
+app.post("/events/:id/comments", authorization, async (req, res) => {
+    try {
+        const event_id = req.params.id;
+        const { content } = req.body;
+        const user_id = req.user.user_id;
+
+        if (!content || content.trim() === "") {
+            return res.status(400).json("Comment cannot be empty");
+        }
+
+        const newComment = await pool.query(
+            "INSERT INTO comments (event_id, user_id, content) VALUES ($1, $2, $3) RETURNING *",
+            [event_id, user_id, content]
+        );
+
+        res.json(newComment.rows[0]);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+app.get("/events/:id/comments", authorization, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const comments = await pool.query(
+            `SELECT c.content, c.created_at, u.full_name,
+            CASE 
+                    WHEN e.organizer_id = c.user_id THEN true 
+                    ELSE false 
+                END AS is_organizer
+             FROM comments c
+             JOIN users u ON c.user_id = u.user_id
+             JOIN events e ON c.event_id = e.event_id
+             WHERE c.event_id = $1
+             ORDER BY c.created_at DESC`,
             [id]
         );
 
-        res.json(reviews.rows);
+        res.json(comments.rows);
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");

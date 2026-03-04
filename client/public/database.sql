@@ -120,6 +120,10 @@ CREATE TABLE IF NOT EXISTS public.users
     full_name character varying(255) COLLATE pg_catalog."default" NOT NULL,
     role character varying(50) COLLATE pg_catalog."default" NOT NULL,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    
+    reset_token TEXT,
+    cdreset_token_expiry TIMESTAMP,
+
     CONSTRAINT users_pkey PRIMARY KEY (user_id),
     CONSTRAINT users_email_key UNIQUE (email),
     CONSTRAINT users_role_check CHECK (role::text = ANY (ARRAY['volunteer'::character varying, 'organization'::character varying]::text[]))

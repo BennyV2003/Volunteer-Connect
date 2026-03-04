@@ -7,6 +7,10 @@ const EventManager = ({ event, onBack }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [isEditing, setIsEditing] = useState(false);
 
+    const [viewingComments, setViewingComments] = useState([]);
+    const [showCommentsModal, setShowCommentsModal] = useState(false);
+    const [newComment, setNewComment] = useState("");
+
     // --- NEW STATE: Tracks the current version of the event to display ---
     // We initialize it with the data passed in, but we can update it locally later.
     const [displayEvent, setDisplayEvent] = useState(event);
@@ -183,6 +187,52 @@ const EventManager = ({ event, onBack }) => {
         const endTime = new Date(end).toLocaleTimeString(undefined, timeOptions);
         return `${dateStr} | ${startTime} - ${endTime}`;
     };
+    
+    const handleSeeComments = async () => {
+    try {
+        const response = await fetch(`http://localhost:5000/events/${event.event_id}/comments`, {
+            headers: { token: localStorage.getItem("token") }
+        });
+
+        if (response.ok) {
+            const jsonData = await response.json();
+            setViewingComments(jsonData);
+            setShowCommentsModal(true);
+        } else {
+            toast.error("Could not fetch comments");
+        }
+    } catch (err) {
+        console.error(err.message);
+    }
+};
+
+const handlePostComment = async () => {
+    if (!newComment.trim()) return;
+
+    try {
+        const response = await fetch(
+            `http://localhost:5000/events/${event.event_id}/comments`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    token: localStorage.getItem("token")
+                },
+                body: JSON.stringify({ content: newComment })
+            }
+        );
+
+        if (response.ok) {
+            setNewComment("");
+            handleSeeComments();
+        } else {
+            toast.error("Could not post comment");
+        }
+    } catch (err) {
+        console.error(err);
+    }
+};
+
 
     return (
         <div style={{ padding: "30px", backgroundColor: "white", borderRadius: "8px", boxShadow: "0 4px 15px rgba(0,0,0,0.1)" }}>
@@ -275,6 +325,21 @@ const EventManager = ({ event, onBack }) => {
                                     ✏️ Edit
                                 </button>
                             </div>
+
+                            <button
+                                onClick={handleSeeComments}
+                                style={{
+                                backgroundColor: "#6c757d",
+                                color: "white",
+                                border: "none",
+                                padding: "8px 15px",
+                                borderRadius: "5px",
+                                cursor: "pointer",
+                                fontWeight: "bold"
+                            }}
+                            >
+                                💬 Comments
+                            </button>
                             
                             <button 
                                 onClick={handleDelete}
@@ -314,6 +379,113 @@ const EventManager = ({ event, onBack }) => {
                     </tbody>
                 </table>
             )}
+{showCommentsModal && (
+<div style={{
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 1000
+}}>
+<div style={{
+    backgroundColor: "white",
+    padding: "20px",
+    borderRadius: "8px",
+    width: "500px",
+    maxWidth: "90%",
+    maxHeight: "80vh",
+    overflowY: "auto"
+}}>
+
+<div style={{
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: "20px",
+    borderBottom: "1px solid #eee",
+    paddingBottom: "10px"
+}}>
+<h3 style={{ margin: 0 }}>Event Comments</h3>
+
+<button
+onClick={() => setShowCommentsModal(false)}
+style={{
+background: "none",
+border: "none",
+fontSize: "1.5rem",
+cursor: "pointer"
+}}
+>
+&times;
+</button>
+</div>
+
+{viewingComments.length === 0 ? (
+<p style={{ textAlign: "center", color: "#666" }}>
+No comments yet.
+</p>
+) : (
+viewingComments.map((comment, index) => (
+<div key={comment.comment_id || index} style={{
+    borderBottom: "1px solid #eee",
+    paddingBottom: "15px",
+    marginBottom: "15px"
+}}>
+    <strong style={{ color: comment.is_organizer ? "#FF5E17" : "#333" }}>
+        {comment.full_name}
+        {comment.is_organizer && (
+            <span title="Event Organizer" style={{ marginLeft: 6 }}>
+                ⭐
+            </span>
+        )}
+    </strong>
+
+    <p style={{ margin: "5px 0", color: "#555" }}>
+        {comment.content}
+    </p>
+
+    <small style={{ color: "#999" }}>
+        {new Date(comment.created_at).toLocaleDateString()}
+    </small>
+</div>
+))
+)}
+
+<textarea
+value={newComment}
+onChange={(e) => setNewComment(e.target.value)}
+placeholder="Write a comment..."
+style={{
+width: "100%",
+padding: "10px",
+borderRadius: "6px",
+border: "1px solid #ccc",
+marginTop: "10px",
+marginBottom: "10px"
+}}
+/>
+
+<button
+onClick={handlePostComment}
+style={{
+padding: "8px 14px",
+backgroundColor: "#28a745",
+color: "white",
+border: "none",
+borderRadius: "5px",
+cursor: "pointer"
+}}
+>
+Post Comment
+</button>
+
+</div>
+</div>
+)}
         </div>
     );
 };

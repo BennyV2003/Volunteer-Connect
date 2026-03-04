@@ -14,6 +14,12 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
     const [showViewReviewsModal, setShowViewReviewsModal] = useState(false);
     const [selectedReviewEvent, setSelectedReviewEvent] = useState(null); // <--- NEW: For Writing Reviews
 
+    const [viewingComments, setViewingComments] = useState([]);
+    const [showCommentsModal, setShowCommentsModal] = useState(false);
+    const [newComment, setNewComment] = useState("");
+    const [selectedCommentEventId, setSelectedCommentEventId] = useState(null);
+
+
     useEffect(() => {
         const getData = async () => {
             try {
@@ -73,6 +79,57 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
             console.error(err.message);
         }
     };
+
+    const handleSeeComments = async (eventId) => {
+    try {
+        const response = await fetch(`http://localhost:5000/events/${eventId}/comments`, {
+            
+                headers: { token: localStorage.getItem("token") }
+            }
+        );
+                
+
+
+        if (response.ok) {
+            const jsonData = await response.json();
+            setViewingComments(jsonData);
+            setSelectedCommentEventId(eventId);
+            setShowCommentsModal(true);
+        } else {
+            toast.error("Could not fetch comments");
+        }
+    } catch (err) {
+        console.error(err.message);
+    }
+};
+
+const handlePostComment = async () => {
+    if (!newComment.trim()) return;
+
+    try {
+        const response = await fetch(
+            `http://localhost:5000/events/${selectedCommentEventId}/comments`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    token: localStorage.getItem("token")
+                },
+                body: JSON.stringify({ content: newComment })
+            }
+        );
+
+        if (response.ok) {
+            setNewComment("");
+            handleSeeComments(selectedCommentEventId);
+        } else {
+            toast.error("Could not post comment");
+        }
+    } catch (err) {
+        console.error(err);
+    }
+};
+
 
     const filteredEvents = events.filter(event => 
         (event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -163,6 +220,13 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
                                         👀 See Reviews
                                     </button>
                                     
+                                    <button
+                                    onClick={() => handleSeeComments(event.event_id)} 
+                                    style={{ ...actionBtnStyle, backgroundColor: "#6c757d", color: "white" }}
+                                        >
+                                    💬 {event.comment_count || 0} Comments
+                                    </button>
+ 
                                     {/* NEW WRITE REVIEW BUTTON */}
                                     <button onClick={() => setSelectedReviewEvent(event)} style={{ ...actionBtnStyle, backgroundColor: "#ffc107", color: "black" }}>
                                         ⭐ Write Review
@@ -198,7 +262,112 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
                         ))}
                     </div>
                 </div>
+            )} 
+            {showCommentsModal && (
+        <div style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        backgroundColor: "rgba(0,0,0,0.5)",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        zIndex: 1000
+    }}>
+        <div style={{
+            backgroundColor: "white",
+            padding: "20px",
+            borderRadius: "8px",
+            width: "500px",
+            maxWidth: "90%",
+            maxHeight: "80vh",
+            overflowY: "auto"
+        }}>
+            <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: "20px",
+                borderBottom: "1px solid #eee",
+                paddingBottom: "10px"
+            }}>
+                <h3 style={{ margin: 0 }}>Event Comments</h3>
+                <button
+                    onClick={() => setShowCommentsModal(false)}
+                    style={{
+                        background: "none",
+                        border: "none",
+                        fontSize: "1.5rem",
+                        cursor: "pointer"
+                    }}
+                >
+                    &times;
+                </button>
+            </div>
+
+            {viewingComments.length === 0 ? (
+                <p style={{ textAlign: "center", color: "#666" }}>
+                    No comments yet.
+                </p>
+            ) : (
+                viewingComments.map((comment, index) => (
+                  
+                    <div key={index} style={{
+    borderBottom: "1px solid #eee",
+    paddingBottom: "15px",
+    marginBottom: "15px"
+}}>
+    <strong style={{ color: comment.is_organizer ? "#FF5E17" : "#333" }}>
+        {comment.full_name}
+        {comment.is_organizer && (
+            <span title="Event Organizer" style={{ marginLeft: 6 }}>
+                ⭐
+            </span>
+        )}
+    </strong>
+
+    <p style={{ margin: "5px 0", color: "#555" }}>
+        {comment.content}
+    </p>
+
+    <small style={{ color: "#999" }}>
+        {new Date(comment.created_at).toLocaleDateString()}
+    </small>
+</div>
+                ))
             )}
+
+            <textarea
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Write a comment..."
+                style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #ccc",
+                    marginTop: "10px",
+                    marginBottom: "10px"
+                }}
+            />
+
+            <button
+                onClick={handlePostComment}
+                style={{
+                    padding: "8px 14px",
+                    backgroundColor: "#28a745",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer"
+                }}
+            >
+                Post Comment
+            </button>
+        </div>
+    </div>
+)}
         </div>
     );
 };
