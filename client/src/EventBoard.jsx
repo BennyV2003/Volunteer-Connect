@@ -14,12 +14,12 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
     const [showViewReviewsModal, setShowViewReviewsModal] = useState(false);
     const [selectedReviewEvent, setSelectedReviewEvent] = useState(null); // <--- NEW: For Writing Reviews
 
-    const [viewingComments, setViewingComments] = useState([]);
     const [showCommentsModal, setShowCommentsModal] = useState(false);
-    const [newComment, setNewComment] = useState("");
+    const [viewingComments, setViewingComments] = useState([]);
     const [selectedCommentEventId, setSelectedCommentEventId] = useState(null);
+    const [newComment, setNewComment] = useState("");
 
-
+    
     useEffect(() => {
         const getData = async () => {
             try {
@@ -103,6 +103,19 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
     }
 };
 
+const refreshEventsOnly = async () => {
+    try {
+        const token = localStorage.getItem("token");
+        const eventsRes = await fetch("http://localhost:5000/events", { headers: { token } });
+        const eventsData = await eventsRes.json();
+
+        const activeEvents = eventsData.filter(e => !e.is_completed);
+        setEvents(activeEvents);
+    } catch (err) {
+        console.error(err.message);
+    }
+};
+
 const handlePostComment = async () => {
     if (!newComment.trim()) return;
 
@@ -121,8 +134,9 @@ const handlePostComment = async () => {
 
         if (response.ok) {
             setNewComment("");
+            await refreshEventsOnly();
             handleSeeComments(selectedCommentEventId);
-        } else {
+        }   else {
             toast.error("Could not post comment");
         }
     } catch (err) {
@@ -130,12 +144,41 @@ const handlePostComment = async () => {
     }
 };
 
+const handleDeleteComment = async (commentId) => {
+    if (!confirm("Delete this comment?")) return;
+
+    try {
+        const response = await fetch(
+            `http://localhost:5000/events/${selectedCommentEventId}/comments/${commentId}`,
+            {
+                method: "DELETE",
+                headers: {
+                    token: localStorage.getItem("token")
+                }
+            }
+        );
+
+        if (response.ok) {
+            toast.success("Comment deleted");
+            await refreshEventsOnly();
+            handleSeeComments(selectedCommentEventId);
+        } else {
+            const errorText = await response.text();
+            toast.error(errorText || "Could not delete comment");
+        }
+    } catch (err) {
+        console.error(err);
+        toast.error("Server Error");
+    }
+};
+
+
 
     const filteredEvents = events.filter(event => 
-        (event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        event.location.toLowerCase().includes(searchTerm.toLowerCase())) &&
-        !mySignupIds.has(event.event_id) 
-    );
+        event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        event.location.toLowerCase().includes(searchTerm.toLowerCase())
+        
+);
 
     const formatEventTime = (startString, endString) => {
         const start = new Date(startString);
@@ -148,6 +191,8 @@ const handlePostComment = async () => {
         const endTime = end.toLocaleTimeString(undefined, timeOptions);
         return `${dateText} | ${startTime} - ${endTime}`;
     };
+
+
 
     const actionBtnStyle = {
         padding: "10px 16px",
@@ -210,11 +255,29 @@ const handlePostComment = async () => {
                                 <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingLeft: "25px", borderLeft: "1px solid #eee", minWidth: "200px" }}>
                                     <button 
                                         onClick={() => handleSignup(event.event_id)}
-                                        disabled={event.capacity && event.current_count >= event.capacity}
-                                        style={{ ...actionBtnStyle, backgroundColor: (event.capacity && event.current_count >= event.capacity) ? "#ccc" : "#FF5E17", color: "white", cursor: (event.capacity && event.current_count >= event.capacity) ? "not-allowed" : "pointer" }}
-                                    >
-                                        {(event.capacity && event.current_count >= event.capacity) ? "Event Full" : "Volunteer Now"}
-                                    </button>
+                                        disabled={
+                                             mySignupIds.has(event.event_id) ||
+                                             (event.capacity && event.current_count >= event.capacity)
+                                                }
+                                        style={{
+                                                 ...actionBtnStyle,
+                                                 backgroundColor: mySignupIds.has(event.event_id)
+                                                     ? "#6c757d"
+                                                     : (event.capacity && event.current_count >= event.capacity)
+                                                     ? "#ccc"
+                                                     : "#FF5E17",
+                                             color: "white",
+                                             cursor: mySignupIds.has(event.event_id) || (event.capacity && event.current_count >= event.capacity)
+                                                     ? "not-allowed"
+                                                     : "pointer"
+                                            }}
+>
+                                              {mySignupIds.has(event.event_id)
+                                                      ? "Already Registered"
+                                                      : (event.capacity && event.current_count >= event.capacity)
+                                                      ? "Event Full"
+                                                      : "Volunteer Now"}
+                                            </button>
 
                                     <button onClick={() => handleSeeReviews(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#17a2b8", color: "white" }}>
                                         👀 See Reviews
@@ -313,11 +376,13 @@ const handlePostComment = async () => {
             ) : (
                 viewingComments.map((comment, index) => (
                   
-                    <div key={index} style={{
-    borderBottom: "1px solid #eee",
-    paddingBottom: "15px",
-    marginBottom: "15px"
+                <div key={comment.comment_id || index}  
+            style={{
+            borderBottom: "1px solid #eee",
+            paddingBottom: "15px",
+            marginBottom: "15px"
 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
     <strong style={{ color: comment.is_organizer ? "#FF5E17" : "#333" }}>
         {comment.full_name}
         {comment.is_organizer && (
@@ -326,6 +391,24 @@ const handlePostComment = async () => {
             </span>
         )}
     </strong>
+
+    {comment.can_delete && (
+            <button
+                onClick={() => handleDeleteComment(comment.comment_id)}
+                style={{
+                    backgroundColor: "#dc3545",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    padding: "4px 8px",
+                    cursor: "pointer",
+                    fontSize: "0.8rem"
+                }}
+            >
+                Delete
+            </button>
+        )}
+    </div>
 
     <p style={{ margin: "5px 0", color: "#555" }}>
         {comment.content}
@@ -343,12 +426,13 @@ const handlePostComment = async () => {
                 onChange={(e) => setNewComment(e.target.value)}
                 placeholder="Write a comment..."
                 style={{
-                    width: "100%",
-                    padding: "10px",
-                    borderRadius: "6px",
-                    border: "1px solid #ccc",
-                    marginTop: "10px",
-                    marginBottom: "10px"
+                   width: "100%",
+                   padding: "10px",
+                   borderRadius: "6px",
+                   border: "1px solid #ccc",
+                   marginTop: "10px",
+                   marginBottom: "10px",
+                   boxSizing: "border-box"
                 }}
             />
 

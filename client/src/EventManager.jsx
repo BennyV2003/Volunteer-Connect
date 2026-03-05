@@ -224,12 +224,47 @@ const handlePostComment = async () => {
 
         if (response.ok) {
             setNewComment("");
+             setDisplayEvent({
+                 ...displayEvent,
+                 comment_count: (displayEvent.comment_count || 0) + 1
+        });
             handleSeeComments();
         } else {
             toast.error("Could not post comment");
         }
     } catch (err) {
         console.error(err);
+    }
+};
+
+const handleDeleteComment = async (commentId) => {
+    if (!confirm("Delete this comment?")) return;
+
+    try {
+        const response = await fetch(
+            `http://localhost:5000/events/${event.event_id}/comments/${commentId}`,
+            {
+                method: "DELETE",
+                headers: {
+                    token: localStorage.getItem("token")
+                }
+            }
+        );
+
+        if (response.ok) {
+            toast.success("Comment deleted");
+            setDisplayEvent({
+                ...displayEvent,
+                comment_count: Math.max((displayEvent.comment_count || 1) - 1, 0)
+    });
+            handleSeeComments();
+        } else {
+            const errorText = await response.text();
+            toast.error(errorText || "Could not delete comment");
+        }
+    } catch (err) {
+        console.error(err);
+        toast.error("Server Error");
     }
 };
 
@@ -338,7 +373,7 @@ const handlePostComment = async () => {
                                 fontWeight: "bold"
                             }}
                             >
-                                💬 Comments
+                                💬  {displayEvent.comment_count || 0} Comments
                             </button>
                             
                             <button 
@@ -435,6 +470,7 @@ viewingComments.map((comment, index) => (
     paddingBottom: "15px",
     marginBottom: "15px"
 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
     <strong style={{ color: comment.is_organizer ? "#FF5E17" : "#333" }}>
         {comment.full_name}
         {comment.is_organizer && (
@@ -443,6 +479,24 @@ viewingComments.map((comment, index) => (
             </span>
         )}
     </strong>
+
+    {comment.can_delete && (
+            <button
+                onClick={() => handleDeleteComment(comment.comment_id)}
+                style={{
+                    backgroundColor: "#dc3545",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    padding: "4px 8px",
+                    cursor: "pointer",
+                    fontSize: "0.8rem"
+                }}
+            >
+                Delete
+            </button>
+        )}
+    </div>
 
     <p style={{ margin: "5px 0", color: "#555" }}>
         {comment.content}

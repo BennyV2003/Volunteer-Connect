@@ -28,16 +28,7 @@ app.get("/", (req, res) => {
     res.send("Hello from the Backend!");
 });
 
-// Example Database Route
-app.get("/users", async (req, res) => {
-    try {
-        const result = await pool.query("SELECT * FROM users");
-        res.json(result.rows);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send("Server Error");
-    }
-});
+
 
 // Register Route
 app.post("/register", async (req, res) => {
@@ -269,10 +260,21 @@ app.get("/my-events", authorization, async (req, res) => {
     try {
         // req.user.user_id comes from the 'authorization' middleware
         const myEvents = await pool.query(
-            "SELECT * FROM events WHERE organizer_id = $1 ORDER BY event_date ASC",
+            `SELECT 
+                e.*,
+                (SELECT COUNT(*) FROM comments c WHERE c.event_id = e.event_id) AS comment_count
+             FROM events e
+             WHERE e.organizer_id = $1
+             ORDER BY e.event_date ASC`,
             [req.user.user_id]
         );
-        res.json(myEvents.rows);
+
+        const formattedEvents = myEvents.rows.map(event => ({
+            ...event,
+            comment_count: parseInt(event.comment_count)
+        }));
+
+        res.json(formattedEvents);
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
@@ -595,19 +597,24 @@ app.post("/events/:id/comments", authorization, async (req, res) => {
 app.get("/events/:id/comments", authorization, async (req, res) => {
     try {
         const { id } = req.params;
+        const currentUserId = req.user.user_id;
 
         const comments = await pool.query(
-            `SELECT c.content, c.created_at, u.full_name,
+            `SELECT c.comment_id, c.content, c.created_at, u.full_name,
             CASE 
                     WHEN e.organizer_id = c.user_id THEN true 
                     ELSE false 
-                END AS is_organizer
+                END AS is_organizer,
+                CASE
+                    WHEN c.user_id = $2 OR e.organizer_id = $2 THEN true
+                    ELSE false
+                END AS can_delete
              FROM comments c
              JOIN users u ON c.user_id = u.user_id
              JOIN events e ON c.event_id = e.event_id
              WHERE c.event_id = $1
              ORDER BY c.created_at DESC`,
-            [id]
+            [id, currentUserId]
         );
 
         res.json(comments.rows);
@@ -616,6 +623,43 @@ app.get("/events/:id/comments", authorization, async (req, res) => {
         res.status(500).send("Server Error");
     }
 });
+    app.delete("/events/:eventId/comments/:commentId", authorization, async (req, res) => {
+    try {
+        const { eventId, commentId } = req.params;
+        const currentUserId = req.user.user_id;
+
+        const commentCheck = await pool.query(
+            `SELECT 
+                c.user_id,
+                e.organizer_id
+             FROM comments c
+             JOIN events e ON c.event_id = e.event_id
+             WHERE c.comment_id = $1 AND c.event_id = $2`,
+            [commentId, eventId]
+        );
+
+        if (commentCheck.rows.length === 0) {
+            return res.status(404).send("Comment not found");
+        }
+
+        const { user_id, organizer_id } = commentCheck.rows[0];
+
+        if (currentUserId !== user_id && currentUserId !== organizer_id) {
+            return res.status(403).send("Not authorized to delete this comment");
+        }
+
+        await pool.query(
+            "DELETE FROM comments WHERE comment_id = $1 AND event_id = $2",
+            [commentId, eventId]
+        );
+
+        res.send("Comment deleted successfully");
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

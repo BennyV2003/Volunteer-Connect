@@ -102,7 +102,30 @@ ALTER TABLE IF EXISTS public.signups
     OWNER to postgres;
 
 
+-- Table for public.comments
 
+CREATE TABLE IF NOT EXISTS public.comments
+(
+    comment_id integer NOT NULL DEFAULT nextval('comments_comment_id_seq'::regclass),
+    event_id integer NOT NULL,
+    user_id integer NOT NULL,
+    content text COLLATE pg_catalog."default" NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT comments_pkey PRIMARY KEY (comment_id),
+    CONSTRAINT comments_event_id_fkey FOREIGN KEY (event_id)
+        REFERENCES public.events (event_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE,
+    CONSTRAINT comments_user_id_fkey FOREIGN KEY (user_id)
+        REFERENCES public.users (user_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+)
+
+TABLESPACE pg_default;
+
+ALTER TABLE IF EXISTS public.comments
+    OWNER to postgres;
 
 
 
@@ -122,7 +145,7 @@ CREATE TABLE IF NOT EXISTS public.users
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     
     reset_token TEXT,
-    cdreset_token_expiry TIMESTAMP,
+    reset_token_expiry TIMESTAMP,
 
     CONSTRAINT users_pkey PRIMARY KEY (user_id),
     CONSTRAINT users_email_key UNIQUE (email),
