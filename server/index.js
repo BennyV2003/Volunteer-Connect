@@ -215,10 +215,14 @@ app.post("/events", authorization, async (req, res) => {
     try {
         // Now accepting 'capacity'
         const { title, description, location, event_date, event_end, capacity } = req.body; 
+
+        // THE FIX: If capacity is an empty string, make it 'null' instead. 
+        // Otherwise, it crashes Postgres which expects an integer.
+        const safeCapacity = capacity === "" ? null : capacity;
         
         const newEvent = await pool.query(
             "INSERT INTO events (title, description, location, event_date, event_end, capacity, organizer_id) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *",
-            [title, description, location, event_date, event_end, capacity, req.user.user_id]
+            [title, description, location, event_date, event_end, safeCapacity, req.user.user_id]
         );
         res.json(newEvent.rows[0]);
     } catch (err) {
@@ -262,7 +266,8 @@ app.get("/my-events", authorization, async (req, res) => {
         const myEvents = await pool.query(
             `SELECT 
                 e.*,
-                (SELECT COUNT(*) FROM comments c WHERE c.event_id = e.event_id) AS comment_count
+                (SELECT COUNT(*) FROM comments c WHERE c.event_id = e.event_id) AS comment_count,
+                COALESCE((SELECT ROUND(AVG(rating), 1) FROM reviews r WHERE r.event_id = e.event_id), 0) AS average_rating
              FROM events e
              WHERE e.organizer_id = $1
              ORDER BY e.event_date ASC`,
@@ -349,9 +354,15 @@ app.put("/signups/:id", authorization, async (req, res) => {
 app.delete("/events/:id", authorization, async (req, res) => {
     try {
         const { id } = req.params;
-        // IMPORTANT: We must delete the signups first, or the database will yell at us (Foreign Key Constraint)
+        
+        // IMPORTANT: We must delete all child records first to prevent Foreign Key errors!
+        await pool.query("DELETE FROM reviews WHERE event_id = $1", [id]);
+        await pool.query("DELETE FROM comments WHERE event_id = $1", [id]);
         await pool.query("DELETE FROM signups WHERE event_id = $1", [id]);
+        
+        // Now it is safe to delete the main event
         await pool.query("DELETE FROM events WHERE event_id = $1", [id]);
+        
         res.json("Event Deleted");
     } catch (err) {
         console.error(err.message);
@@ -461,7 +472,9 @@ app.get("/my-signups", authorization, async (req, res) => {
                     signups.check_out_time,
                     users.full_name as organizer_name,
                     -- NEW LINE BELOW: Calculates total signups for this event
-                    (SELECT COUNT(*) FROM signups s2 WHERE s2.event_id = events.event_id) AS current_count
+                    (SELECT COUNT(*) FROM signups s2 WHERE s2.event_id = events.event_id) AS current_count,
+                    (SELECT COUNT(*) FROM comments c WHERE c.event_id = events.event_id) AS comment_count,
+                    COALESCE((SELECT ROUND(AVG(rating), 1) FROM reviews r WHERE r.event_id = events.event_id), 0) AS average_rating
              FROM signups 
              JOIN events ON signups.event_id = events.event_id 
              JOIN users ON events.organizer_id = users.user_id 
@@ -533,13 +546,34 @@ app.get("/leaderboard", async (req, res) => {
     }
 });
 
-// 1. POST A REVIEW
+// 1. POST A REVIEW (WITH VERIFICATION)
 app.post("/events/:id/reviews", authorization, async (req, res) => {
     try {
         const event_id = req.params.id;
         const { rating, comment } = req.body;
         const user_id = req.user.user_id; // From token
 
+        // --- NEW SECURITY CHECK 1: Did they actually attend? ---
+        const verifyAttendance = await pool.query(
+            "SELECT * FROM signups WHERE event_id = $1 AND volunteer_id = $2 AND status = 'attended'",
+            [event_id, user_id]
+        );
+
+        if (verifyAttendance.rows.length === 0) {
+            return res.status(403).json("You must have verified attendance at this event to leave a review.");
+        }
+
+        // --- NEW SECURITY CHECK 2: Did they already review it? ---
+        const duplicateCheck = await pool.query(
+            "SELECT * FROM reviews WHERE event_id = $1 AND user_id = $2",
+            [event_id, user_id]
+        );
+
+        if (duplicateCheck.rows.length > 0) {
+            return res.status(400).json("You have already reviewed this event.");
+        }
+
+        // If they pass both checks, save the review!
         const newReview = await pool.query(
             "INSERT INTO reviews (event_id, user_id, rating, comment) VALUES ($1, $2, $3, $4) RETURNING *",
             [event_id, user_id, rating, comment]
@@ -570,7 +604,49 @@ app.get("/events/:id/reviews", async (req, res) => {
     }
 });
 
+// 3. EDIT A REVIEW
+app.put("/events/:eventId/reviews/:reviewId", authorization, async (req, res) => {
+    try {
+        const { eventId, reviewId } = req.params;
+        const { rating, comment } = req.body;
+        const userId = req.user.user_id; // Secure token check
 
+        // The WHERE clause acts as our security wall: it only updates if the user_id matches!
+        const updateReview = await pool.query(
+            "UPDATE reviews SET rating = $1, comment = $2 WHERE review_id = $3 AND event_id = $4 AND user_id = $5 RETURNING *",
+            [rating, comment, reviewId, eventId, userId]
+        );
+
+        if (updateReview.rows.length === 0) {
+            return res.status(403).json("Not authorized to edit this review.");
+        }
+        res.json(updateReview.rows[0]);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+// 4. DELETE A REVIEW
+app.delete("/events/:eventId/reviews/:reviewId", authorization, async (req, res) => {
+    try {
+        const { eventId, reviewId } = req.params;
+        const userId = req.user.user_id;
+
+        const deleteReview = await pool.query(
+            "DELETE FROM reviews WHERE review_id = $1 AND event_id = $2 AND user_id = $3 RETURNING *",
+            [reviewId, eventId, userId]
+        );
+
+        if (deleteReview.rows.length === 0) {
+            return res.status(403).json("Not authorized to delete this review.");
+        }
+        res.json("Review deleted successfully");
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
 
 app.post("/events/:id/comments", authorization, async (req, res) => {
     try {

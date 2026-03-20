@@ -33,7 +33,8 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
                 const ids = new Set(signupsData.map(s => s.event_id));
                 setMySignupIds(ids);
 
-                const activeEvents = eventsData.filter(e => !e.is_completed);
+                // Add the second condition: && !ids.has(e.event_id)
+                const activeEvents = eventsData.filter(e => !e.is_completed && !ids.has(e.event_id));
                 setEvents(activeEvents);
 
             } catch (err) {
@@ -192,6 +193,18 @@ const handleDeleteComment = async (commentId) => {
         return `${dateText} | ${startTime} - ${endTime}`;
     };
 
+    const formatDisplayName = (fullName, isOrganizer) => {
+        if (!fullName) return "Volunteer";
+        // Let organizers keep their full name (e.g., "Texas Food Bank")
+        if (isOrganizer) return fullName; 
+        
+        const nameParts = fullName.trim().split(" ");
+        const firstName = nameParts[0];
+        const lastInitial = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0) : "";
+        
+        return `${firstName} ${lastInitial}.`;
+    };
+
 
 
     const actionBtnStyle = {
@@ -278,10 +291,6 @@ const handleDeleteComment = async (commentId) => {
                                                       ? "Event Full"
                                                       : "Volunteer Now"}
                                             </button>
-
-                                    <button onClick={() => handleSeeReviews(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#17a2b8", color: "white" }}>
-                                        👀 See Reviews
-                                    </button>
                                     
                                     <button
                                     onClick={() => handleSeeComments(event.event_id)} 
@@ -290,10 +299,6 @@ const handleDeleteComment = async (commentId) => {
                                     💬 {event.comment_count || 0} Comments
                                     </button>
  
-                                    {/* NEW WRITE REVIEW BUTTON */}
-                                    <button onClick={() => setSelectedReviewEvent(event)} style={{ ...actionBtnStyle, backgroundColor: "#ffc107", color: "black" }}>
-                                        ⭐ Write Review
-                                    </button>
                                 </div>
                             </div>
                         ))
@@ -384,7 +389,7 @@ const handleDeleteComment = async (commentId) => {
 }}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
     <strong style={{ color: comment.is_organizer ? "#FF5E17" : "#333" }}>
-        {comment.full_name}
+        {formatDisplayName(comment.full_name, comment.is_organizer)}
         {comment.is_organizer && (
             <span title="Event Organizer" style={{ marginLeft: 6 }}>
                 ⭐

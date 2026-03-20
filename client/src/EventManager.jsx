@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import VolunteerRow from "./VolunteerRow";
 import { toast } from 'react-toastify'; 
+import ReviewsModal from "./ReviewsModal";
 
 const EventManager = ({ event, onBack }) => {
     const [attendees, setAttendees] = useState([]);
@@ -10,6 +11,7 @@ const EventManager = ({ event, onBack }) => {
     const [viewingComments, setViewingComments] = useState([]);
     const [showCommentsModal, setShowCommentsModal] = useState(false);
     const [newComment, setNewComment] = useState("");
+    const [showReviewsModal, setShowReviewsModal] = useState(false);
 
     // --- NEW STATE: Tracks the current version of the event to display ---
     // We initialize it with the data passed in, but we can update it locally later.
@@ -325,7 +327,15 @@ const handleDeleteComment = async (commentId) => {
                         /* --- VIEW MODE (UPDATED to use displayEvent) --- */
                         <div>
                             {/* NOTE: We now use displayEvent instead of event */}
-                            <h1 style={{ margin: "0 0 10px 0", color: "#FF5E17" }}>{displayEvent.title}</h1>
+                            <h1 style={{ margin: "0 0 10px 0", color: "#FF5E17", display: "flex", alignItems: "center", gap: "12px" }}>
+                                {displayEvent.title}
+                                
+                                {displayEvent.average_rating > 0 && (
+                                    <span style={{ fontSize: "1.2rem", color: "#ffc107", backgroundColor: "#fff8e1", padding: "4px 10px", borderRadius: "12px", border: "1px solid #ffe082" }}>
+                                        ⭐ {Number(displayEvent.average_rating).toFixed(1)}
+                                    </span>
+                                )}
+                            </h1>
                             <p style={{ color: "#666", margin: "5px 0", fontSize: "1.1rem" }}>
                                 📅 <strong>{formatDisplayDate(displayEvent.event_date, displayEvent.event_end)}</strong>
                             </p>
@@ -337,48 +347,43 @@ const handleDeleteComment = async (commentId) => {
                     )}
 
                     {!isEditing && (
-                        <div style={{ display: "flex", gap: "10px", flexDirection: "column", alignItems: "flex-end" }}>
-                            <div style={{display: "flex", gap: "10px"}}>
-                                {!displayEvent.is_completed ? (
-                                    <button 
-                                        onClick={handleComplete}
-                                        style={{ backgroundColor: "#17a2b8", color: "white", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
-                                    >
-                                        ✅ Finish Event
-                                    </button>
-                                ) : (
-                                    <span style={{ padding: "8px 15px", border: "2px solid #FF5E17", color: "#FF5E17", borderRadius: "5px", fontWeight: "bold", backgroundColor: "#e9f7ef" }}>
-                                        Event Closed
-                                    </span>
-                                )}
+                        <div style={{ display: "flex", gap: "10px", flexDirection: "column", minWidth: "200px" }}>
 
+                            {!displayEvent.is_completed ? (
                                 <button 
-                                    onClick={() => setIsEditing(true)}
-                                    disabled={displayEvent.is_completed}
-                                    style={{ backgroundColor: displayEvent.is_completed ? "#ccc" : "#ffc107", color: "black", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}
+                                    onClick={handleComplete}
+                                    style={{ backgroundColor: "#17a2b8", color: "white", border: "none", padding: "10px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", width: "100%" }}
                                 >
-                                    ✏️ Edit
+                                    ✅ Finish Event
                                 </button>
-                            </div>
+                            ) : (
+                                <button 
+                                    onClick={() => setShowReviewsModal(true)}
+                                    style={{ backgroundColor: "#17a2b8", color: "white", border: "none", padding: "10px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", width: "100%" }}
+                                >
+                                    👀 See Reviews
+                                </button>
+                            )}
 
                             <button
                                 onClick={handleSeeComments}
-                                style={{
-                                backgroundColor: "#6c757d",
-                                color: "white",
-                                border: "none",
-                                padding: "8px 15px",
-                                borderRadius: "5px",
-                                cursor: "pointer",
-                                fontWeight: "bold"
-                            }}
+                                style={{ backgroundColor: "#6c757d", color: "white", border: "none", padding: "10px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", width: "100%" }}
                             >
                                 💬  {displayEvent.comment_count || 0} Comments
                             </button>
-                            
+
+                            {!displayEvent.is_completed && (
+                                <button 
+                                    onClick={() => setIsEditing(true)}
+                                    style={{ backgroundColor: "#ffc107", color: "black", border: "none", padding: "10px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", width: "100%" }}
+                                >
+                                    ✏️ Edit
+                                </button>
+                            )}
+
                             <button 
                                 onClick={handleDelete}
-                                style={{ backgroundColor: "#dc3545", color: "white", border: "none", padding: "8px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", width: "100%" }}
+                                style={{ backgroundColor: "#dc3545", color: "white", border: "none", padding: "10px 15px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", width: "100%" }}
                             >
                                 🗑️ Delete
                             </button>
@@ -510,28 +515,28 @@ viewingComments.map((comment, index) => (
 )}
 
 <textarea
-value={newComment}
-onChange={(e) => setNewComment(e.target.value)}
-placeholder="Write a comment..."
-style={{
-width: "100%",
-padding: "10px",
-borderRadius: "6px",
-border: "1px solid #ccc",
-marginTop: "10px",
-marginBottom: "10px"
+    value={newComment}
+    onChange={(e) => setNewComment(e.target.value)}
+    placeholder="Write a comment..."
+    style={{
+    width: "100%",
+    padding: "10px",
+    borderRadius: "6px",
+    border: "1px solid #ccc",
+    marginTop: "10px",
+    marginBottom: "10px"
 }}
 />
 
 <button
-onClick={handlePostComment}
-style={{
-padding: "8px 14px",
-backgroundColor: "#28a745",
-color: "white",
-border: "none",
-borderRadius: "5px",
-cursor: "pointer"
+    onClick={handlePostComment}
+    style={{
+    padding: "8px 14px",
+    backgroundColor: "#28a745",
+    color: "white",
+    border: "none",
+    borderRadius: "5px",
+    cursor: "pointer"
 }}
 >
 Post Comment
@@ -540,6 +545,14 @@ Post Comment
 </div>
 </div>
 )}
+{/* REVIEWS MODAL (READ ONLY FOR ORGANIZERS) */}
+            {showReviewsModal && (
+                <ReviewsModal 
+                    event={displayEvent} 
+                    onClose={() => setShowReviewsModal(false)} 
+                    readOnly={true} 
+                />
+            )}
         </div>
     );
 };
