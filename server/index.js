@@ -14,6 +14,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// --- SIMULATED EMAIL HELPER ---
+const sendSimulatedEmail = (toEmail, subject, message) => {
+    console.log("\n=========================================");
+    console.log(`📧 SIMULATED EMAIL SENT TO: ${toEmail}`);
+    console.log(`📋 SUBJECT: ${subject}`);
+    console.log(`💬 MESSAGE:\n${message}`);
+    console.log("=========================================\n");
+};
+
 // Database Connection
 const pool = new Pool({
     user: process.env.DB_USER,
@@ -350,17 +359,32 @@ app.put("/signups/:id", authorization, async (req, res) => {
     }
 });
 
-// 3. Delete an Event
+// 3. Delete an Event (SECURED)
 app.delete("/events/:id", authorization, async (req, res) => {
     try {
         const { id } = req.params;
-        
-        // IMPORTANT: We must delete all child records first to prevent Foreign Key errors!
+        const currentUserId = req.user.user_id;
+
+        // NEW: Verify the person deleting the event actually owns it
+        const eventCheck = await pool.query(
+            "SELECT organizer_id FROM events WHERE event_id = $1", 
+            [id]
+        );
+
+        if (eventCheck.rows.length === 0) {
+            return res.status(404).json("Event not found");
+        }
+
+        if (eventCheck.rows[0].organizer_id !== currentUserId) {
+            return res.status(403).json("Not authorized to delete this event.");
+        }
+
+        // Safe to delete child records first
         await pool.query("DELETE FROM reviews WHERE event_id = $1", [id]);
         await pool.query("DELETE FROM comments WHERE event_id = $1", [id]);
         await pool.query("DELETE FROM signups WHERE event_id = $1", [id]);
         
-        // Now it is safe to delete the main event
+        // Finally, delete the event
         await pool.query("DELETE FROM events WHERE event_id = $1", [id]);
         
         res.json("Event Deleted");
@@ -578,6 +602,27 @@ app.post("/events/:id/reviews", authorization, async (req, res) => {
             "INSERT INTO reviews (event_id, user_id, rating, comment) VALUES ($1, $2, $3, $4) RETURNING *",
             [event_id, user_id, rating, comment]
         );
+
+        // --- NEW: FETCH ORGANIZER INFO FOR EMAIL NOTIFICATION ---
+        const organizerData = await pool.query(
+            `SELECT u.email, u.full_name AS org_name, e.title 
+             FROM events e 
+             JOIN users u ON e.organizer_id = u.user_id 
+             WHERE e.event_id = $1`,
+            [event_id] // <-- Changed to match your variable!
+        );
+
+        if (organizerData.rows.length > 0) {
+            const { email, org_name, title } = organizerData.rows[0];
+            sendSimulatedEmail(
+                email,
+                `New Review for: ${title}`,
+                `Hello ${org_name},\n\nGreat news! A volunteer just left a new review for your past event "${title}". Log in to your Organizer Dashboard to check out your updated average rating and read their feedback!`
+            );
+        }
+        // --------------------------------------------------------
+        
+        // Your existing res.json() goes here...
         res.json(newReview.rows[0]);
     } catch (err) {
         console.error(err.message);
@@ -662,6 +707,25 @@ app.post("/events/:id/comments", authorization, async (req, res) => {
             "INSERT INTO comments (event_id, user_id, content) VALUES ($1, $2, $3) RETURNING *",
             [event_id, user_id, content]
         );
+
+       // --- NEW: FETCH ORGANIZER INFO FOR EMAIL NOTIFICATION ---
+        const organizerData = await pool.query(
+            `SELECT u.email, u.full_name AS org_name, e.title 
+             FROM events e 
+             JOIN users u ON e.organizer_id = u.user_id 
+             WHERE e.event_id = $1`,
+            [event_id] // <-- Fixed to match your variable!
+        );
+
+        if (organizerData.rows.length > 0) {
+            const { email, org_name, title } = organizerData.rows[0];
+            sendSimulatedEmail(
+                email,
+                `New Comment on: ${title}`,
+                `Hello ${org_name},\n\nA volunteer just asked a question or left a comment on your event "${title}". Log in to your Organizer Dashboard to reply!`
+            );
+        }
+        // --------------------------------------------------------
 
         res.json(newComment.rows[0]);
     } catch (err) {
