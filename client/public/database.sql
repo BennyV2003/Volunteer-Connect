@@ -1,5 +1,3 @@
--- VolunteerConnect: schema for a new, empty PostgreSQL database.
--- Contains no accounts or personal data. Does not replace or migrate existing tables.
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.users
