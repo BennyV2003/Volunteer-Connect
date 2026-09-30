@@ -45,10 +45,3 @@ There are no preloaded accounts or events. Register as an organization to create
 - Password-reset links print in the backend terminal. No email is sent.
 - The backend uses port 5000. AirPlay Receiver on macOS can occupy that port.
 
-## Existing database
-
-If you already set up the app before comments were added, run this from the project folder:
-
-psql -v ON_ERROR_STOP=1 -d volunteer_db -f server/migrations/001_add_comments.sql
-
-Restart the backend after updating.
