@@ -14,6 +14,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// --- SIMULATED EMAIL HELPER ---
+const sendSimulatedEmail = (toEmail, subject, message) => {
+    console.log("\n=========================================");
+    console.log(`📧 SIMULATED EMAIL SENT TO: ${toEmail}`);
+    console.log(`📋 SUBJECT: ${subject}`);
+    console.log(`💬 MESSAGE:\n${message}`);
+    console.log("=========================================\n");
+};
+
 // Database Connection
 const pool = new Pool({
     user: process.env.DB_USER,
@@ -28,16 +37,7 @@ app.get("/", (req, res) => {
     res.send("Hello from the Backend!");
 });
 
-// Example Database Route
-app.get("/users", async (req, res) => {
-    try {
-        const result = await pool.query("SELECT * FROM users");
-        res.json(result.rows);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send("Server Error");
-    }
-});
+
 
 // Register Route
 app.post("/register", async (req, res) => {
@@ -224,10 +224,14 @@ app.post("/events", authorization, async (req, res) => {
     try {
         // Now accepting 'capacity'
         const { title, description, location, event_date, event_end, capacity } = req.body; 
+
+        // THE FIX: If capacity is an empty string, make it 'null' instead. 
+        // Otherwise, it crashes Postgres which expects an integer.
+        const safeCapacity = capacity === "" ? null : capacity;
         
         const newEvent = await pool.query(
             "INSERT INTO events (title, description, location, event_date, event_end, capacity, organizer_id) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *",
-            [title, description, location, event_date, event_end, capacity, req.user.user_id]
+            [title, description, location, event_date, event_end, safeCapacity, req.user.user_id]
         );
         res.json(newEvent.rows[0]);
     } catch (err) {
@@ -243,7 +247,8 @@ app.get("/events", async (req, res) => {
             `SELECT 
                 e.*, 
                 u.full_name as organizer_name,
-                (SELECT COUNT(*) FROM signups s WHERE s.event_id = e.event_id) as current_count
+                (SELECT COUNT(*) FROM signups s WHERE s.event_id = e.event_id) as current_count,
+                (SELECT COUNT(*) FROM comments c WHERE c.event_id = e.event_id) as comment_count
              FROM events e
              JOIN users u ON e.organizer_id = u.user_id
              ORDER BY e.event_date ASC`
@@ -252,7 +257,8 @@ app.get("/events", async (req, res) => {
         // Ensure current_count is a number (Postgres sometimes returns strings for counts)
         const formattedEvents = allEvents.rows.map(event => ({
             ...event,
-            current_count: parseInt(event.current_count)
+            current_count: parseInt(event.current_count),
+            comment_count: parseInt(event.comment_count)
         }));
 
         res.json(formattedEvents);
@@ -267,10 +273,22 @@ app.get("/my-events", authorization, async (req, res) => {
     try {
         // req.user.user_id comes from the 'authorization' middleware
         const myEvents = await pool.query(
-            "SELECT * FROM events WHERE organizer_id = $1 ORDER BY event_date ASC",
+            `SELECT 
+                e.*,
+                (SELECT COUNT(*) FROM comments c WHERE c.event_id = e.event_id) AS comment_count,
+                COALESCE((SELECT ROUND(AVG(rating), 1) FROM reviews r WHERE r.event_id = e.event_id), 0) AS average_rating
+             FROM events e
+             WHERE e.organizer_id = $1
+             ORDER BY e.event_date ASC`,
             [req.user.user_id]
         );
-        res.json(myEvents.rows);
+
+        const formattedEvents = myEvents.rows.map(event => ({
+            ...event,
+            comment_count: parseInt(event.comment_count)
+        }));
+
+        res.json(formattedEvents);
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
@@ -341,13 +359,34 @@ app.put("/signups/:id", authorization, async (req, res) => {
     }
 });
 
-// 3. Delete an Event
+// 3. Delete an Event (SECURED)
 app.delete("/events/:id", authorization, async (req, res) => {
     try {
         const { id } = req.params;
-        // IMPORTANT: We must delete the signups first, or the database will yell at us (Foreign Key Constraint)
+        const currentUserId = req.user.user_id;
+
+        // NEW: Verify the person deleting the event actually owns it
+        const eventCheck = await pool.query(
+            "SELECT organizer_id FROM events WHERE event_id = $1", 
+            [id]
+        );
+
+        if (eventCheck.rows.length === 0) {
+            return res.status(404).json("Event not found");
+        }
+
+        if (eventCheck.rows[0].organizer_id !== currentUserId) {
+            return res.status(403).json("Not authorized to delete this event.");
+        }
+
+        // Safe to delete child records first
+        await pool.query("DELETE FROM reviews WHERE event_id = $1", [id]);
+        await pool.query("DELETE FROM comments WHERE event_id = $1", [id]);
         await pool.query("DELETE FROM signups WHERE event_id = $1", [id]);
+        
+        // Finally, delete the event
         await pool.query("DELETE FROM events WHERE event_id = $1", [id]);
+        
         res.json("Event Deleted");
     } catch (err) {
         console.error(err.message);
@@ -457,7 +496,9 @@ app.get("/my-signups", authorization, async (req, res) => {
                     signups.check_out_time,
                     users.full_name as organizer_name,
                     -- NEW LINE BELOW: Calculates total signups for this event
-                    (SELECT COUNT(*) FROM signups s2 WHERE s2.event_id = events.event_id) AS current_count
+                    (SELECT COUNT(*) FROM signups s2 WHERE s2.event_id = events.event_id) AS current_count,
+                    (SELECT COUNT(*) FROM comments c WHERE c.event_id = events.event_id) AS comment_count,
+                    COALESCE((SELECT ROUND(AVG(rating), 1) FROM reviews r WHERE r.event_id = events.event_id), 0) AS average_rating
              FROM signups 
              JOIN events ON signups.event_id = events.event_id 
              JOIN users ON events.organizer_id = users.user_id 
@@ -529,17 +570,59 @@ app.get("/leaderboard", async (req, res) => {
     }
 });
 
-// 1. POST A REVIEW
+// 1. POST A REVIEW (WITH VERIFICATION)
 app.post("/events/:id/reviews", authorization, async (req, res) => {
     try {
         const event_id = req.params.id;
         const { rating, comment } = req.body;
         const user_id = req.user.user_id; // From token
 
+        // --- NEW SECURITY CHECK 1: Did they actually attend? ---
+        const verifyAttendance = await pool.query(
+            "SELECT * FROM signups WHERE event_id = $1 AND volunteer_id = $2 AND status = 'attended'",
+            [event_id, user_id]
+        );
+
+        if (verifyAttendance.rows.length === 0) {
+            return res.status(403).json("You must have verified attendance at this event to leave a review.");
+        }
+
+        // --- NEW SECURITY CHECK 2: Did they already review it? ---
+        const duplicateCheck = await pool.query(
+            "SELECT * FROM reviews WHERE event_id = $1 AND user_id = $2",
+            [event_id, user_id]
+        );
+
+        if (duplicateCheck.rows.length > 0) {
+            return res.status(400).json("You have already reviewed this event.");
+        }
+
+        // If they pass both checks, save the review!
         const newReview = await pool.query(
             "INSERT INTO reviews (event_id, user_id, rating, comment) VALUES ($1, $2, $3, $4) RETURNING *",
             [event_id, user_id, rating, comment]
         );
+
+        // --- NEW: FETCH ORGANIZER INFO FOR EMAIL NOTIFICATION ---
+        const organizerData = await pool.query(
+            `SELECT u.email, u.full_name AS org_name, e.title 
+             FROM events e 
+             JOIN users u ON e.organizer_id = u.user_id 
+             WHERE e.event_id = $1`,
+            [event_id] // <-- Changed to match your variable!
+        );
+
+        if (organizerData.rows.length > 0) {
+            const { email, org_name, title } = organizerData.rows[0];
+            sendSimulatedEmail(
+                email,
+                `New Review for: ${title}`,
+                `Hello ${org_name},\n\nGreat news! A volunteer just left a new review for your past event "${title}". Log in to your Organizer Dashboard to check out your updated average rating and read their feedback!`
+            );
+        }
+        // --------------------------------------------------------
+        
+        // Your existing res.json() goes here...
         res.json(newReview.rows[0]);
     } catch (err) {
         console.error(err.message);
@@ -566,27 +649,157 @@ app.get("/events/:id/reviews", async (req, res) => {
     }
 });
 
-// GET all reviews for a specific event
-app.get("/events/:id/reviews", authorization, async (req, res) => {
+// 3. EDIT A REVIEW
+app.put("/events/:eventId/reviews/:reviewId", authorization, async (req, res) => {
     try {
-        const { id } = req.params; // The event_id
+        const { eventId, reviewId } = req.params;
+        const { rating, comment } = req.body;
+        const userId = req.user.user_id; // Secure token check
 
-        // We JOIN with the users table to get the name of the reviewer
-        const reviews = await pool.query(
-            `SELECT r.rating, r.comment, r.created_at, u.user_name 
-             FROM reviews AS r
-             JOIN users AS u ON r.user_id = u.user_id
-             WHERE r.event_id = $1
-             ORDER BY r.created_at DESC`,
-            [id]
+        // The WHERE clause acts as our security wall: it only updates if the user_id matches!
+        const updateReview = await pool.query(
+            "UPDATE reviews SET rating = $1, comment = $2 WHERE review_id = $3 AND event_id = $4 AND user_id = $5 RETURNING *",
+            [rating, comment, reviewId, eventId, userId]
         );
 
-        res.json(reviews.rows);
+        if (updateReview.rows.length === 0) {
+            return res.status(403).json("Not authorized to edit this review.");
+        }
+        res.json(updateReview.rows[0]);
     } catch (err) {
         console.error(err.message);
         res.status(500).send("Server Error");
     }
 });
+
+// 4. DELETE A REVIEW
+app.delete("/events/:eventId/reviews/:reviewId", authorization, async (req, res) => {
+    try {
+        const { eventId, reviewId } = req.params;
+        const userId = req.user.user_id;
+
+        const deleteReview = await pool.query(
+            "DELETE FROM reviews WHERE review_id = $1 AND event_id = $2 AND user_id = $3 RETURNING *",
+            [reviewId, eventId, userId]
+        );
+
+        if (deleteReview.rows.length === 0) {
+            return res.status(403).json("Not authorized to delete this review.");
+        }
+        res.json("Review deleted successfully");
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+app.post("/events/:id/comments", authorization, async (req, res) => {
+    try {
+        const event_id = req.params.id;
+        const { content } = req.body;
+        const user_id = req.user.user_id;
+
+        if (!content || content.trim() === "") {
+            return res.status(400).json("Comment cannot be empty");
+        }
+
+        const newComment = await pool.query(
+            "INSERT INTO comments (event_id, user_id, content) VALUES ($1, $2, $3) RETURNING *",
+            [event_id, user_id, content]
+        );
+
+       // --- NEW: FETCH ORGANIZER INFO FOR EMAIL NOTIFICATION ---
+        const organizerData = await pool.query(
+            `SELECT u.email, u.full_name AS org_name, e.title 
+             FROM events e 
+             JOIN users u ON e.organizer_id = u.user_id 
+             WHERE e.event_id = $1`,
+            [event_id] // <-- Fixed to match your variable!
+        );
+
+        if (organizerData.rows.length > 0) {
+            const { email, org_name, title } = organizerData.rows[0];
+            sendSimulatedEmail(
+                email,
+                `New Comment on: ${title}`,
+                `Hello ${org_name},\n\nA volunteer just asked a question or left a comment on your event "${title}". Log in to your Organizer Dashboard to reply!`
+            );
+        }
+        // --------------------------------------------------------
+
+        res.json(newComment.rows[0]);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
+app.get("/events/:id/comments", authorization, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const currentUserId = req.user.user_id;
+
+        const comments = await pool.query(
+            `SELECT c.comment_id, c.content, c.created_at, u.full_name,
+            CASE 
+                    WHEN e.organizer_id = c.user_id THEN true 
+                    ELSE false 
+                END AS is_organizer,
+                CASE
+                    WHEN c.user_id = $2 OR e.organizer_id = $2 THEN true
+                    ELSE false
+                END AS can_delete
+             FROM comments c
+             JOIN users u ON c.user_id = u.user_id
+             JOIN events e ON c.event_id = e.event_id
+             WHERE c.event_id = $1
+             ORDER BY c.created_at DESC`,
+            [id, currentUserId]
+        );
+
+        res.json(comments.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+    app.delete("/events/:eventId/comments/:commentId", authorization, async (req, res) => {
+    try {
+        const { eventId, commentId } = req.params;
+        const currentUserId = req.user.user_id;
+
+        const commentCheck = await pool.query(
+            `SELECT 
+                c.user_id,
+                e.organizer_id
+             FROM comments c
+             JOIN events e ON c.event_id = e.event_id
+             WHERE c.comment_id = $1 AND c.event_id = $2`,
+            [commentId, eventId]
+        );
+
+        if (commentCheck.rows.length === 0) {
+            return res.status(404).send("Comment not found");
+        }
+
+        const { user_id, organizer_id } = commentCheck.rows[0];
+
+        if (currentUserId !== user_id && currentUserId !== organizer_id) {
+            return res.status(403).send("Not authorized to delete this comment");
+        }
+
+        await pool.query(
+            "DELETE FROM comments WHERE comment_id = $1 AND event_id = $2",
+            [commentId, eventId]
+        );
+
+        res.send("Comment deleted successfully");
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send("Server Error");
+    }
+});
+
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

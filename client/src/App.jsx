@@ -204,7 +204,7 @@ function App() {
                       <div style={{ width: "100%" }}>
                           <EventBoard 
                               refreshTrigger={refreshTrigger} 
-                              onSignupSuccess={() => setRefreshTrigger(!refreshTrigger)} 
+                              onSignupSuccess={() => setRefreshTrigger(!refreshTrigger)} userName={userName}
                           />
                           <MySignups 
                               userName={userName}

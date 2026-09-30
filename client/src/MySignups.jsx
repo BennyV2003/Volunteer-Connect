@@ -6,12 +6,68 @@ import ReviewsModal from "./ReviewsModal";
 const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
     const [signups, setSignups] = useState([]);
     const [selectedReviewEvent, setSelectedReviewEvent] = useState(null); 
-    const [viewingReviews, setViewingReviews] = useState([]); 
-    const [showViewReviewsModal, setShowViewReviewsModal] = useState(false);
 
     useEffect(() => {
         getSignups();
     }, [refreshTrigger]);
+
+    // --- COMMENTS STATE ---
+    const [viewingComments, setViewingComments] = useState([]);
+    const [showCommentsModal, setShowCommentsModal] = useState(false);
+    const [selectedCommentEventId, setSelectedCommentEventId] = useState(null);
+    const [newComment, setNewComment] = useState("");
+
+    // --- COMMENTS HANDLERS ---
+    const handleSeeComments = async (eventId) => {
+        try {
+            const response = await fetch(`http://localhost:5000/events/${eventId}/comments`, {
+                headers: { token: localStorage.getItem("token") }
+            });
+            if (response.ok) {
+                const jsonData = await response.json();
+                setViewingComments(jsonData);
+                setSelectedCommentEventId(eventId);
+                setShowCommentsModal(true);
+            }
+        } catch (err) {
+            console.error(err.message);
+        }
+    };
+
+    const handlePostComment = async () => {
+        if (!newComment.trim()) return;
+        try {
+            const response = await fetch(`http://localhost:5000/events/${selectedCommentEventId}/comments`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", token: localStorage.getItem("token") },
+                body: JSON.stringify({ content: newComment })
+            });
+            if (response.ok) {
+                setNewComment("");
+                await getSignups(); // Refresh the list
+                handleSeeComments(selectedCommentEventId);
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleDeleteComment = async (commentId) => {
+        if (!confirm("Delete this comment?")) return;
+        try {
+            const response = await fetch(`http://localhost:5000/events/${selectedCommentEventId}/comments/${commentId}`, {
+                method: "DELETE",
+                headers: { token: localStorage.getItem("token") }
+            });
+            if (response.ok) {
+                toast.success("Comment deleted");
+                await getSignups(); // Refresh the list
+                handleSeeComments(selectedCommentEventId);
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
 
     const getSignups = async () => {
         try {
@@ -20,24 +76,6 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
             });
             const jsonData = await response.json();
             setSignups(jsonData);
-        } catch (err) {
-            console.error(err.message);
-        }
-    };
-
-    const handleSeeReviews = async (eventId) => {
-        try {
-            const response = await fetch(`http://localhost:5000/events/${eventId}/reviews`, {
-                headers: { token: localStorage.getItem("token") }
-            });
-            
-            if (response.ok) {
-                const jsonData = await response.json();
-                setViewingReviews(jsonData); 
-                setShowViewReviewsModal(true); 
-            } else {
-                toast.error("Could not fetch reviews");
-            }
         } catch (err) {
             console.error(err.message);
         }
@@ -97,6 +135,17 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
         return `${dateText} | ${startTime} - ${endTime}`;
     };
 
+    const formatDisplayName = (fullName, isOrganizer) => {
+        if (!fullName) return "Volunteer";
+        if (isOrganizer) return fullName; 
+        
+        const nameParts = fullName.trim().split(" ");
+        const firstName = nameParts[0];
+        const lastInitial = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0) : "";
+        
+        return `${firstName} ${lastInitial}.`;
+    };
+
     const activeEvents = signups.filter(event => !event.is_completed);
     const completedEvents = signups.filter(event => event.is_completed);
 
@@ -138,7 +187,6 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
                                 <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" }}>
                                     <h3 style={{ margin: "0", color: "#28a745" }}>{event.title}</h3>
                                     
-                                    {/* --- NEW: CAPACITY BADGE --- */}
                                     {event.capacity > 0 && (
                                         <span style={{ 
                                             fontSize: "0.8rem", padding: "4px 10px", borderRadius: "15px", 
@@ -164,12 +212,10 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
                                 <button onClick={() => handleUnregister(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "white", color: "#dc3545", border: "1px solid #dc3545" }}>
                                     Unregister
                                 </button>
-                                
-                                <button onClick={() => handleSeeReviews(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#17a2b8", color: "white" }}>
-                                    👀 See Reviews
-                                </button>
-                                <button onClick={() => setSelectedReviewEvent(event)} style={{ ...actionBtnStyle, backgroundColor: "#ffc107", color: "black" }}>
-                                    ⭐ Write Review
+
+                                {/* NEW COMMENTS BUTTON */}
+                                <button onClick={() => handleSeeComments(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#6c757d", color: "white" }}>
+                                    💬 {event.comment_count || 0} Comments
                                 </button>
                             </div>
                         </div>
@@ -192,7 +238,15 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
                             }}>
                                 <div style={{ flex: 1 }}> 
                                     <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "5px" }}>
-                                        <h3 style={{ margin: 0, color: "#333", fontSize: "1.4rem" }}>{event.title}</h3>
+                                        <h3 style={{ margin: 0, color: "#333", fontSize: "1.4rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                                            {event.title}
+                                            {/* NEW: Only show the star if the average is greater than 0! */}
+                                            {event.average_rating > 0 && (
+                                                <span style={{ fontSize: "1.1rem", color: "#ffc107", backgroundColor: "#fff8e1", padding: "2px 8px", borderRadius: "12px", border: "1px solid #ffe082" }}>
+                                                    ⭐ {Number(event.average_rating).toFixed(1)}
+                                                </span>
+                                            )}
+                                        </h3>
                                         <span style={{ backgroundColor: event.status === 'attended' ? "#28a745" : "#6c757d", color: "white", padding: "4px 10px", borderRadius: "15px", fontSize: "0.8rem", fontWeight: "bold" }}>
                                             {event.status === 'attended' ? `Attended (+${Number(event.hours_awarded || 0)} Hrs)` : (event.status || "Completed")}
                                         </span>
@@ -210,11 +264,10 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
                                         <button onClick={() => generateCertificate(event)} style={{ ...actionBtnStyle, backgroundColor: "#007bff", color: "white" }}>
                                             🖨️ Print Certificate
                                         </button>
-                                        <button onClick={() => handleSeeReviews(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#17a2b8", color: "white" }}>
-                                            👀 See Reviews
-                                        </button>
+                                        
+                                        {/* THE REVIEW BUTTONS STAY HERE! */}
                                         <button onClick={() => setSelectedReviewEvent(event)} style={{ ...actionBtnStyle, backgroundColor: "#ffc107", color: "black" }}>
-                                            ⭐ Write Review
+                                            ⭐ Write a Review
                                         </button>
                                     </div>
                                 )}
@@ -226,25 +279,63 @@ const MySignups = ({ refreshTrigger, onUnregisterSuccess, userName }) => {
             
             {/* MODALS */}
             {selectedReviewEvent && (
-                <ReviewsModal event={selectedReviewEvent} userName={userName} onClose={() => setSelectedReviewEvent(null)} />
+                <ReviewsModal 
+                    event={selectedReviewEvent} 
+                    userName={userName} 
+                    onClose={() => setSelectedReviewEvent(null)} 
+                    onReviewChange={getSignups} // <--- NEW: Triggers the parent to fetch fresh data!
+                />
             )}
-            {showViewReviewsModal && (
+            {showCommentsModal && (
                 <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}>
                     <div style={{ backgroundColor: "white", padding: "20px", borderRadius: "8px", width: "500px", maxWidth: "90%", maxHeight: "80vh", overflowY: "auto" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "20px", borderBottom: "1px solid #eee", paddingBottom: "10px" }}>
-                            <h3 style={{ margin: 0, color: "#333" }}>Event Reviews</h3>
-                            <button onClick={() => setShowViewReviewsModal(false)} style={{ background: "none", border: "none", fontSize: "1.5rem", cursor: "pointer" }}>&times;</button>
+                            <h3 style={{ margin: 0 }}>Event Comments</h3>
+                            <button onClick={() => setShowCommentsModal(false)} style={{ background: "none", border: "none", fontSize: "1.5rem", cursor: "pointer" }}>&times;</button>
                         </div>
-                        {viewingReviews.length === 0 ? <p style={{ textAlign: "center", color: "#666" }}>No reviews yet.</p> : viewingReviews.map((review, index) => (
-                            <div key={index} style={{ borderBottom: "1px solid #eee", paddingBottom: "15px", marginBottom: "15px" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
-                                    <strong style={{ fontSize: "1.05rem" }}>{review.user_name || "Volunteer"}</strong>
-                                    <span style={{ color: "#FFD700", fontSize: "1.2rem" }}>{"★".repeat(review.rating)}</span>
+
+                        {viewingComments.length === 0 ? (
+                            <p style={{ textAlign: "center", color: "#666" }}>No comments yet.</p>
+                        ) : (
+                            viewingComments.map((comment, index) => (
+                                <div key={comment.comment_id || index} style={{ borderBottom: "1px solid #eee", paddingBottom: "15px", marginBottom: "15px" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                        <strong style={{ color: comment.is_organizer ? "#FF5E17" : "#333" }}>
+                                            {formatDisplayName(comment.full_name, comment.is_organizer)}
+                                            {comment.is_organizer && (
+                                                <span title="Event Organizer" style={{ marginLeft: 6 }}>⭐</span>
+                                            )}
+                                        </strong>
+
+                                        {comment.can_delete && (
+                                            <button
+                                                onClick={() => handleDeleteComment(comment.comment_id)}
+                                                style={{ backgroundColor: "#dc3545", color: "white", border: "none", borderRadius: "4px", padding: "4px 8px", cursor: "pointer", fontSize: "0.8rem" }}
+                                            >
+                                                Delete
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <p style={{ margin: "5px 0", color: "#555" }}>{comment.content}</p>
+                                    <small style={{ color: "#999" }}>{new Date(comment.created_at).toLocaleDateString()}</small>
                                 </div>
-                                <p style={{ margin: "5px 0", color: "#555", lineHeight: "1.4" }}>"{review.comment}"</p>
-                                <small style={{ color: "#999" }}>{new Date(review.created_at).toLocaleDateString()}</small>
-                            </div>
-                        ))}
+                            ))
+                        )}
+
+                        <textarea
+                            value={newComment}
+                            onChange={(e) => setNewComment(e.target.value)}
+                            placeholder="Write a comment..."
+                            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #ccc", marginTop: "10px", marginBottom: "10px", boxSizing: "border-box" }}
+                        />
+
+                        <button
+                            onClick={handlePostComment}
+                            style={{ padding: "8px 14px", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                        >
+                            Post Comment
+                        </button>
                     </div>
                 </div>
             )}

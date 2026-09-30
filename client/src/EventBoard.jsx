@@ -14,6 +14,12 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
     const [showViewReviewsModal, setShowViewReviewsModal] = useState(false);
     const [selectedReviewEvent, setSelectedReviewEvent] = useState(null); // <--- NEW: For Writing Reviews
 
+    const [showCommentsModal, setShowCommentsModal] = useState(false);
+    const [viewingComments, setViewingComments] = useState([]);
+    const [selectedCommentEventId, setSelectedCommentEventId] = useState(null);
+    const [newComment, setNewComment] = useState("");
+
+    
     useEffect(() => {
         const getData = async () => {
             try {
@@ -27,7 +33,8 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
                 const ids = new Set(signupsData.map(s => s.event_id));
                 setMySignupIds(ids);
 
-                const activeEvents = eventsData.filter(e => !e.is_completed);
+                // Add the second condition: && !ids.has(e.event_id)
+                const activeEvents = eventsData.filter(e => !e.is_completed && !ids.has(e.event_id));
                 setEvents(activeEvents);
 
             } catch (err) {
@@ -74,11 +81,105 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
         }
     };
 
+    const handleSeeComments = async (eventId) => {
+    try {
+        const response = await fetch(`http://localhost:5000/events/${eventId}/comments`, {
+            
+                headers: { token: localStorage.getItem("token") }
+            }
+        );
+                
+
+
+        if (response.ok) {
+            const jsonData = await response.json();
+            setViewingComments(jsonData);
+            setSelectedCommentEventId(eventId);
+            setShowCommentsModal(true);
+        } else {
+            toast.error("Could not fetch comments");
+        }
+    } catch (err) {
+        console.error(err.message);
+    }
+};
+
+const refreshEventsOnly = async () => {
+    try {
+        const token = localStorage.getItem("token");
+        const eventsRes = await fetch("http://localhost:5000/events", { headers: { token } });
+        const eventsData = await eventsRes.json();
+
+        const activeEvents = eventsData.filter(e => !e.is_completed);
+        setEvents(activeEvents);
+    } catch (err) {
+        console.error(err.message);
+    }
+};
+
+const handlePostComment = async () => {
+    if (!newComment.trim()) return;
+
+    try {
+        const response = await fetch(
+            `http://localhost:5000/events/${selectedCommentEventId}/comments`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    token: localStorage.getItem("token")
+                },
+                body: JSON.stringify({ content: newComment })
+            }
+        );
+
+        if (response.ok) {
+            setNewComment("");
+            await refreshEventsOnly();
+            handleSeeComments(selectedCommentEventId);
+        }   else {
+            toast.error("Could not post comment");
+        }
+    } catch (err) {
+        console.error(err);
+    }
+};
+
+const handleDeleteComment = async (commentId) => {
+    if (!confirm("Delete this comment?")) return;
+
+    try {
+        const response = await fetch(
+            `http://localhost:5000/events/${selectedCommentEventId}/comments/${commentId}`,
+            {
+                method: "DELETE",
+                headers: {
+                    token: localStorage.getItem("token")
+                }
+            }
+        );
+
+        if (response.ok) {
+            toast.success("Comment deleted");
+            await refreshEventsOnly();
+            handleSeeComments(selectedCommentEventId);
+        } else {
+            const errorText = await response.text();
+            toast.error(errorText || "Could not delete comment");
+        }
+    } catch (err) {
+        console.error(err);
+        toast.error("Server Error");
+    }
+};
+
+
+
     const filteredEvents = events.filter(event => 
-        (event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        event.location.toLowerCase().includes(searchTerm.toLowerCase())) &&
-        !mySignupIds.has(event.event_id) 
-    );
+        event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        event.location.toLowerCase().includes(searchTerm.toLowerCase())
+        
+);
 
     const formatEventTime = (startString, endString) => {
         const start = new Date(startString);
@@ -91,6 +192,20 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
         const endTime = end.toLocaleTimeString(undefined, timeOptions);
         return `${dateText} | ${startTime} - ${endTime}`;
     };
+
+    const formatDisplayName = (fullName, isOrganizer) => {
+        if (!fullName) return "Volunteer";
+        // Let organizers keep their full name (e.g., "Texas Food Bank")
+        if (isOrganizer) return fullName; 
+        
+        const nameParts = fullName.trim().split(" ");
+        const firstName = nameParts[0];
+        const lastInitial = nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0) : "";
+        
+        return `${firstName} ${lastInitial}.`;
+    };
+
+
 
     const actionBtnStyle = {
         padding: "10px 16px",
@@ -153,20 +268,37 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
                                 <div style={{ display: "flex", flexDirection: "column", gap: "12px", paddingLeft: "25px", borderLeft: "1px solid #eee", minWidth: "200px" }}>
                                     <button 
                                         onClick={() => handleSignup(event.event_id)}
-                                        disabled={event.capacity && event.current_count >= event.capacity}
-                                        style={{ ...actionBtnStyle, backgroundColor: (event.capacity && event.current_count >= event.capacity) ? "#ccc" : "#FF5E17", color: "white", cursor: (event.capacity && event.current_count >= event.capacity) ? "not-allowed" : "pointer" }}
-                                    >
-                                        {(event.capacity && event.current_count >= event.capacity) ? "Event Full" : "Volunteer Now"}
-                                    </button>
-
-                                    <button onClick={() => handleSeeReviews(event.event_id)} style={{ ...actionBtnStyle, backgroundColor: "#17a2b8", color: "white" }}>
-                                        👀 See Reviews
-                                    </button>
+                                        disabled={
+                                             mySignupIds.has(event.event_id) ||
+                                             (event.capacity && event.current_count >= event.capacity)
+                                                }
+                                        style={{
+                                                 ...actionBtnStyle,
+                                                 backgroundColor: mySignupIds.has(event.event_id)
+                                                     ? "#6c757d"
+                                                     : (event.capacity && event.current_count >= event.capacity)
+                                                     ? "#ccc"
+                                                     : "#FF5E17",
+                                             color: "white",
+                                             cursor: mySignupIds.has(event.event_id) || (event.capacity && event.current_count >= event.capacity)
+                                                     ? "not-allowed"
+                                                     : "pointer"
+                                            }}
+>
+                                              {mySignupIds.has(event.event_id)
+                                                      ? "Already Registered"
+                                                      : (event.capacity && event.current_count >= event.capacity)
+                                                      ? "Event Full"
+                                                      : "Volunteer Now"}
+                                            </button>
                                     
-                                    {/* NEW WRITE REVIEW BUTTON */}
-                                    <button onClick={() => setSelectedReviewEvent(event)} style={{ ...actionBtnStyle, backgroundColor: "#ffc107", color: "black" }}>
-                                        ⭐ Write Review
+                                    <button
+                                    onClick={() => handleSeeComments(event.event_id)} 
+                                    style={{ ...actionBtnStyle, backgroundColor: "#6c757d", color: "white" }}
+                                        >
+                                    💬 {event.comment_count || 0} Comments
                                     </button>
+ 
                                 </div>
                             </div>
                         ))
@@ -198,7 +330,133 @@ const EventBoard = ({ refreshTrigger, onSignupSuccess, userName }) => { // <--- 
                         ))}
                     </div>
                 </div>
+            )} 
+            {showCommentsModal && (
+        <div style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        backgroundColor: "rgba(0,0,0,0.5)",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        zIndex: 1000
+    }}>
+        <div style={{
+            backgroundColor: "white",
+            padding: "20px",
+            borderRadius: "8px",
+            width: "500px",
+            maxWidth: "90%",
+            maxHeight: "80vh",
+            overflowY: "auto"
+        }}>
+            <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: "20px",
+                borderBottom: "1px solid #eee",
+                paddingBottom: "10px"
+            }}>
+                <h3 style={{ margin: 0 }}>Event Comments</h3>
+                <button
+                    onClick={() => setShowCommentsModal(false)}
+                    style={{
+                        background: "none",
+                        border: "none",
+                        fontSize: "1.5rem",
+                        cursor: "pointer"
+                    }}
+                >
+                    &times;
+                </button>
+            </div>
+
+            {viewingComments.length === 0 ? (
+                <p style={{ textAlign: "center", color: "#666" }}>
+                    No comments yet.
+                </p>
+            ) : (
+                viewingComments.map((comment, index) => (
+                  
+                <div key={comment.comment_id || index}  
+            style={{
+            borderBottom: "1px solid #eee",
+            paddingBottom: "15px",
+            marginBottom: "15px"
+}}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <strong style={{ color: comment.is_organizer ? "#FF5E17" : "#333" }}>
+        {formatDisplayName(comment.full_name, comment.is_organizer)}
+        {comment.is_organizer && (
+            <span title="Event Organizer" style={{ marginLeft: 6 }}>
+                ⭐
+            </span>
+        )}
+    </strong>
+
+    {comment.can_delete && (
+            <button
+                onClick={() => handleDeleteComment(comment.comment_id)}
+                style={{
+                    backgroundColor: "#dc3545",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "4px",
+                    padding: "4px 8px",
+                    cursor: "pointer",
+                    fontSize: "0.8rem"
+                }}
+            >
+                Delete
+            </button>
+        )}
+    </div>
+
+    <p style={{ margin: "5px 0", color: "#555" }}>
+        {comment.content}
+    </p>
+
+    <small style={{ color: "#999" }}>
+        {new Date(comment.created_at).toLocaleDateString()}
+    </small>
+</div>
+                ))
             )}
+
+            <textarea
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Write a comment..."
+                style={{
+                   width: "100%",
+                   padding: "10px",
+                   borderRadius: "6px",
+                   border: "1px solid #ccc",
+                   marginTop: "10px",
+                   marginBottom: "10px",
+                   boxSizing: "border-box"
+                }}
+            />
+
+            <button
+                onClick={handlePostComment}
+                style={{
+                    padding: "8px 14px",
+                    backgroundColor: "#28a745",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer"
+                }}
+            >
+                Post Comment
+            </button>
+        </div>
+    </div>
+)}
         </div>
     );
 };
